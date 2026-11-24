@@ -280,7 +280,6 @@ def cost_unit(task: tuple[str, Path, str, str]) -> tuple[str, str]:
     tic = time.perf_counter()
     try:
         import rps_refine_lab as lab
-        from beatvk_vk_arms import _coarse_spec, fullrange_init
 
         from tracking.joint_beam_tracker import (
             BeamCfg,
@@ -290,6 +289,8 @@ def cost_unit(task: tuple[str, Path, str, str]) -> tuple[str, str]:
             joint_beam_track,
             score_trajectory,
         )
+        from tracking.pipelines import coarse_init
+        from tracking.pipelines import coarse_spectrogram as _coarse_spec
 
         prep, meta = load_window(window)
         # `--cfg` selects a CEILING_CFGS entry so the cost gate is evaluated on
@@ -328,7 +329,7 @@ def cost_unit(task: tuple[str, Path, str, str]) -> tuple[str, str]:
         try:
             _, rid, widx = window.split(":")
             seed = lab.get_seed(f"{rid}_w{int(widx):02d}", prep, True)
-            r_fri = fullrange_init(prep, seed)[0]
+            r_fri = coarse_init(prep, seed.bases)[0]
             trajs["fullrange_init"] = np.stack([np.interp(st, prep.ft, row) for row in r_fri])
         except ValueError:  # synthetic windows have no `real:` name to cache under
             r_fri = None

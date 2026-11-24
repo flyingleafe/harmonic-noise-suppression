@@ -457,6 +457,317 @@ Held-out flights: 4, 4 and 10 (5 with a landing); means only, no spread.
 - **Start-up and landing: ours**, on path everywhere and on increments except
   DREGON's start-up (1.79 against 1.46).
 
+### Multiscale path score: sensitivity control (failed)
+
+Can a single score detect visible faults in a free-running four-rotor path?
+Before ranking generators, score an ensemble of *other real flights* against
+each held-out recording, then corrupt just the ensemble and score the same
+observation. Same folds as above: 4 MD2, 4 VID M100, 10 DREGON recordings.
+No self-match; no dynamic time warping. The gate is applied in the affected
+phase, **before** averaging across phases: dilution by a long cruise is not
+the explanation for a failure.
+
+At 25 Hz transform the four speeds into collective, roll, pitch and yaw modes.
+Score (i) the ordered raw window, (ii) its four means and (iii) the sequences
+of differences between adjacent box means with widths 2, 4, 8, … samples.
+Each component uses the fair ensemble energy score on the *entire vector*,
+divided by the square root of its dimension. Normalize each mode using the
+clean training ensemble (SD for raw and mean, RMS for differences, floor
+0.5% of training median hover); reuse those scales for the corrupted ensemble.
+Give one vote to each component. This is an application of [Pic et al.'s
+transformation and aggregation rule](https://doi.org/10.5194/ascmo-11-23-2025),
+not a claim that these particular weights have been validated.
+
+Use the aligned phase windows above, cropping to common recorded support.
+In settled cruise, use windows up to 40.96 s, one path per training donor
+and eight origin replicates averaged **within** each held-out flight. The
+control magnitudes are relative to the donor's hover: independent 2% RMS
+Gaussian jitter; a common linear drift from −8% to +8% (random sign);
+reversal of rotor 1 alone within the cruise window (same individual-rotor
+histogram and power spectrum); and, on MD2 start-up, subtract any excess
+of the rotor mean above the recorded standby plateau.
+
+Gate fixed before running: in a majority of applicable rigs the median
+paired score penalty must exceed the median absolute deviation (MAD) of
+real-versus-real flight scores, and a majority of flights must worsen.
+For jitter and drift also require a positive, larger penalty at the fine
+and coarse end respectively. MAD is a practical effect-size threshold,
+not a significance test. Each cell below is the median paired penalty;
+positive means the distortion scores worse.
+
+| Distortion | MD2 | VID M100 | DREGON | Flights worse | Rigs passing |
+|---|---:|---:|---:|---:|---:|
+| Cruise drift | +0.431 | +0.332 | +0.447 | 18/18 | 3/3 |
+| Cruise jitter | +0.018 | +0.037 | +0.028 | 15/18 | 0/3 |
+| Reverse one rotor | −0.003 | +0.017 | +0.001 | 10/18 | 0/3 |
+| Flatten start-up spike | +0.119 | — | — | 3/4 | 0/1 |
+
+The clean cruise MADs were 0.075, 0.097 and 0.113, respectively. Jitter
+was visible at 80 ms (penalties 0.159, 0.234, 0.150) but washed out in the
+average. Drift concentrated at the coarsest widths (20.48 s on MD2/VID,
+10.24 s on DREGON). Removing the spike was smaller than MD2's clean start-up
+MAD (0.300); on FLY108 it even improved the score by 0.079. Reversing one
+rotor was scarcely distinguished despite preserving each rotor's univariate
+spectrum. This establishes sensitivity to the chosen drift, **not** to
+overall flight realism. No generator ranking or weight tuning followed.
+Per-flight results and octave profiles: `results/rps_traj/regimes/multiscale.json`.
+
+### Can a joint spectral distance recognise a real rig in cruise? (Spectra-only baseline)
+
+Compare four motor speeds **jointly**, on settled cruise only. Estimate the
+complex 4×4 cross-spectrum on 16 s windows at 25 Hz (demean each motor, no
+time taper, smooth the outer products over three Fourier bins). Score four
+octaves, [0.25, 0.5), [0.5, 1), [1, 2), [2, 4) Hz. The upper limit avoids
+the documented DREGON measurement artifact; this experiment says nothing
+about variation slower than 4 s, the hover mean, or transition shapes.
+Within each octave divide each matrix entry `(i,j)` by the geometric mean
+of the two calibration auto-powers. Calibration uses one whole prespecified
+flight from each multi-recording rig, then the median across rigs. These
+scales are shared: a quiet flight is not rescaled to look like a noisy one.
+
+The distance is the root-mean-square complex Frobenius difference, averaged
+first over frequency bins and then equally over octaves. Power and coupling
+are its diagonal and off-diagonal contributions. This is a descriptive use
+of [spectral-matrix L2 distance](https://doi.org/10.3150/13-BEJ584), not the
+paper's hypothesis test. Mean each flight's features before forming a rig
+centroid: one physical flight, one vote. Calibration flights never enter a
+centroid or serve as queries. Blackbird is a candidate for other queries,
+not a cross-flight identity test of itself.
+
+For each distortion compare the augmented and original window against the
+**same** clean mean of other evaluation flights from its rig. Take the
+median paired penalty within physical flight, then across flights. A rig
+passes if the median exceeds the clean between-flight MAD and a majority
+of flights get worse; for a band-specific fault, its intended octave must
+also have the largest penalty. Require a majority of eligible rigs, not a
+majority of pooled windows. Shared Fourier-phase randomization must instead
+preserve the complete matrix to relative error below `1e-10`; independent
+phases and a circular delay of motor 1 must preserve all four auto-spectra
+to the same tolerance. These [Fourier controls](https://doi.org/10.1103/PhysRevLett.73.951)
+are stationary controls, not simulated flight maneuvers.
+
+**Coverage.** 137 measured physical recordings yielded 280 non-overlapping
+windows (maximum four per flight); six calibration recordings took 18
+windows. The map uses the other 131 recordings / 262 windows. The independent
+test has 130 recordings: Blackbird is a single flight. NeuroBEM pieces are
+grouped by the original recording, not treated as flights. DREGON is room 1
+only: the five command-only recordings are not motor-speed measurements.
+
+| Augmentation on real cruise | Flights farther from clean reference | Rigs passing |
+|---|---:|---:|
+| Same random Fourier phase for all rotors | invariant, max relative error 3.7e−14 | 7/7 (invariance) |
+| Independent Fourier phases, coupling score | 99/130 | 1/6 (NeuroBEM) |
+| Delay one rotor 80 ms, coupling score | 100/130 | 0/6 |
+| Common 0.3125 Hz sinusoid, 4% of hover peak, low-octave power | 73/130 | 3/6 |
+| Independent 2–4 Hz jitter, 2% of hover RMS, high-octave power | 127/130 | 5/6 |
+
+**Real versus real.** For a query window, compare mean distance to the
+windows of another recording of its rig against mean distance to the windows
+of a recording from another rig. The win probability treats ties as half
+and weights other rigs equally; aggregate queries by flight, then rig.
+Also identify the held-out *flight mean* by nearest rig centroid. Require
+win probability above 0.5 **and** a majority of flights identified.
+
+| Rig | Same-rig win probability | Held-out flights correctly identified |
+|---|---:|---:|
+| DREGON | 0.991 | 4/4 |
+| MD2 | 0.808 | 2/3 |
+| NanoBench | 0.478 | 7/10 |
+| NeuroBEM | 0.508 | 16/49 |
+| PI-TCN | 0.524 | 26/61 |
+| VID M100 | 0.799 | 0/3 |
+| Blackbird | — | — |
+
+Only DREGON and MD2 pass both criteria. The rig-balanced win probability
+is 0.685 (0.542 weighting flights equally); flight identification is 52.0%
+rig-balanced, 55/130 pooled. The distinction between *same flight* and
+*same rig* matters: PI-TCN's median distance to other windows of the same
+recording is 19.5, to windows of another flight of the same rig 185.2,
+and to other rigs 160.8 (query-window medians of mean distances).
+
+**Map and verdict.** All 21 exact centroid distances are in
+`results/rps_traj/regimes/spectral_only/rig_centroid_distance.csv`; all segment pairs in
+`segment_distance.npz`; per-flight evidence, dataset pins and calibration
+scales in `spectral_validation.json`. `rig_centroid_mds.png` is metric MDS
+(SMACOF, classical initialization): normalized stress 0.0924, Pearson
+0.984, Spearman 0.977, nearest neighbour preserved for 5/7. DREGON–MD2
+is the closest pair (2.24); Blackbird–NeuroBEM the farthest (290.29).
+These are distances between **mean spectra**, not evidence of seven tight
+clusters. The score detects fast excess power, but it is **not validated
+as a standalone coupling or rig-identity score**. Neither the qualitative
+appearance of the map nor the direction of the augmentation penalties
+overrides the cross-flight failures. No generator ranking.
+
+### Operating speed plus joint spectral dynamics (current distance)
+
+For each scored 16 s window, take the four motor means **before** demeaning.
+The level distance `L` is the RMS difference between the four means in
+rev/s: this sees both a common change in operating speed and a change in
+motor trim with no change in their overall average. `S` is the unchanged
+complex cross-spectral distance above. Use the dimensionless distance
+`sqrt((L / 106.0274)² + (S / 23.4657)²)`. Each denominator is the median of
+that block's 15 pairwise distances between the six reserved calibration
+flight means. Neither the scales nor the combination were fitted to the
+held-out identification results. This gives the blocks equal weight at
+their respective calibration scales, not equal influence on every pair.
+
+Offset controls on all 262 evaluation windows: adding 30 rev/s to every motor
+gave distance 0.28295; adding it to one gave 0.14147. Alternating +30 and
+−30 across motors gave 0.28295 despite keeping the overall mean fixed.
+In all three controls the spectral component changed by less than 3e−14.
+The original fluctuation controls are reported separately in `spectral_controls`;
+these offsets test level sensitivity, not realism or cross-motor timing.
+
+On the same held-out flights, rig-balanced same-rig win probability went
+from 0.685 to 0.705; nearest-centroid identification stayed at 55/130
+(52.0% rig-balanced). `rig_centroid_distance.csv` and `segment_distance.npz`
+in the campaign output root now use the combined distance. The descriptive
+all-flight map uses all 137 recordings, including calibration: normalized
+stress 0.097, distance rank correlation 0.982. Its coordinate CSV also
+contains each flight's four mean cruise speeds in rev/s.
+
+`flight_mds.html` shows individual recordings. Click a flight dot in any
+panel to inspect all four measured rotor-speed traces; shading marks the
+exact scored cruise windows. The flight selector also reaches overlapping
+dots. NeuroBEM recording parts are shown separately on their own clocks.
+
+### Held-out comparison on the commanded phase schedule
+
+**Decision rule fixed before running the five generators.** Test the visual
+claim from `generated_flights.html`, not rig identification. Use the 13
+measured targets (4 MD2, 4 VID M100, 5 DREGON); the campaign's cached
+generator folds exclude the target but can include DREGON command-only
+training recordings. Score every illustrated arm and a separate reference
+ensemble of other measured flights. No best-of-N draw selection, generated
+event re-detection, time warping, or score for the duration of a phase.
+
+* Use the fair ensemble energy score (Euclidean distance to the observation
+  minus half the mean distance between distinct draws). During start-up,
+  standby, take-off and landing use the absolute four-rotor path on the
+  event clock (RMS path distance) and a vector of three readouts in rev/s:
+  peak collective speed, maximum instantaneous rotor range and RMS 0.2 s
+  increment. Report the two scores individually and average after scaling.
+* In settled cruise a fresh draw need not reproduce the time of a specific
+  manoeuvre. Score the distribution of `CruiseMetric`'s four mean speeds
+  plus complex cross-spectrum, rather than the sample clock or the 2D map.
+  Fit its shared block scales on reserved calibration recordings of the
+  **other rigs**, so no held-out target sets its own weights. Retain separate
+  mean-speed and spectral scores as diagnostics.
+* For each feature block divide by the median pairwise feature distance
+  between measured training donors at the same event/origin, with a floor
+  of 1% of training hover (divide by the cruise level scale for the joint
+  feature). This expresses an error relative to between-flight variability
+  without dividing by a potentially zero real-reference score. It is a
+  design choice, not a physically unique exchange rate between phases.
+* Weight the two short-phase readouts equally, cruise origins equally
+  within a flight, the five phases equally within a flight, flights equally
+  within a rig and the three rigs equally. Report each phase regardless of
+  the ordering. For each baseline report the paired mean difference,
+  per-flight wins and a descriptive 95% percentile interval (10,000
+  within-rig paired flight resamples; fixed folds, fits and draws).
+* Before model scoring, compare clean training donors and augmented copies
+  against the same independent real targets. A +10% training-hover offset
+  tests level sensitivity; flatten each short path to its per-rotor mean
+  or collapse it to its instantaneous collective to test dynamics/spread;
+  shared/independent Fourier phases and fast jitter test cruise. A shared
+  random Fourier phase must leave the cruise score unchanged to numerical precision.
+  For each positive-control phase report the flight-paired penalty against
+  normal clean-score variation (per-rig median > clean MAD and majority of
+  flights worse). Report model scores even for insensitive endpoints, but
+  do not interpret those endpoints as evidence of fidelity to that fault.
+  No change to weights, arms or acceptance after viewing scores.
+
+**Results (2026-11-22).** 13/13 measured targets yielded all five phase
+scores for every arm (325 model rows). No generated window required
+post-landing padding; no scored target or real-donor window contained a
+bridged sample. Only the five command-only targets were excluded. The
+cruise metric used five foreign-rig calibration flights for each target
+rig. Training-fold held-out identifiers, block counts and durations matched
+the 39 required cached cruise fits.
+
+| Donor distortion: rigs passing out of 3 | Start-up | Standby | Take-off | Cruise | Landing |
+|---|---:|---:|---:|---:|---:|
+| Common offset, +10% of training hover | 3 | 3 | 3 | 1 | 3 |
+| Flatten each motor over time | 3 | 2 | 3 | — | 3 |
+| Collapse all motors to the collective | 3 | 3 | 3 | — | 3 |
+| Independent Fourier phases | — | — | — | 0 | — |
+| Independent 2–4 Hz jitter, 2% hover RMS | — | — | — | 3 | — |
+
+The shared-phase negative preserved the cruise score to within 3.6e−15.
+Independent phases worsened 10/13 flights and the cruise DC shift worsened
+12/13, but neither consistently exceeded normal flight-to-flight variation.
+
+| Generator | Start-up | Standby | Take-off | Cruise | Landing | Balanced | Baseline − ours [95% paired interval] | Ours wins |
+|---|---:|---:|---:|---:|---:|---:|---|---:|
+| Proposed | 2.04 | 0.67 | 0.76 | 2.15 | 0.69 | 1.26 | — | — |
+| Phase VAR(2) | 1.89 | 1.25 | 0.89 | 2.52 | 1.32 | 1.57 | 0.31 [0.12, 0.61] | 11/13 |
+| Phase VAR(4) | 1.55 | 1.72 | 0.82 | 2.39 | 1.25 | 1.55 | 0.28 [0.21, 0.36] | 10/13 |
+| VAR(2) + MS-VAR(3 states) | 1.89 | 1.25 | 0.88 | 2.11 | 1.32 | 1.49 | 0.23 [0.03, 0.54] | 7/13 |
+| VAR(2) + VAR-HSMM(3 states) | 1.89 | 1.25 | 0.88 | 2.11 | 1.32 | 1.49 | 0.23 [0.03, 0.53] | 6/13 |
+| Other real flights (reference only) | 0.37 | 0.38 | 0.50 | 1.95 | 0.51 | 0.74 | — | — |
+
+The proposed model reduced the equal-phase, equal-rig mean by 15.2–19.7%
+relative to these four fitted generators. Its strongest aggregate gains were
+standby and landing. Its ordering against each baseline survived leaving any
+one phase out. The mean is not the median flight: against the HSMM hybrid
+the proposed model won all four MD2 flights, one DREGON flight, and only the
+outdoor yaw sequence on VID (paired improvement 1.74 on that sequence).
+The hybrids were better in cruise. Phase VAR(4) had a lower start-up score:
+on DREGON the proposed model actually had the better ordered path, but
+the worse joint peak/spread/increment score. Real donors beat every fitted
+generator on the aggregate; they are a descriptive reference, not a lower
+bound. Do not extrapolate this result to one-step forecasts, arbitrary
+maneuvers, new rigs, autonomous transitions, or the acoustic comparison.
+
+Evidence in `results/rps_traj/regimes/schedule_eval/`: every paired score
+and its supports in `schedule_{controls,models}.json`, aggregation in
+`summary.json`, print-ready table and figure in `schedule-table.tex` and
+`schedule-example.pdf`. The figure uses measured FLY124 and the same 32
+draws per displayed arm. Its first column runs continuously from motors-on
+to takeoff; cruise uses the middle scored 16 s window. These are display
+choices, not changes to any phase score.
+
+**Why is the VAR-HSMM hybrid ahead in settled cruise?** Replaying just
+these two arms with the saved fold caches and seeds reproduces each of
+the 78 published arm/origin scores. The hybrid wins 10/13 flights; its
+equal-rig advantage is 0.0414 (descriptive 95% paired flight bootstrap
+0.0015–0.0854, fixed draws and rigs). The same score is mean distance
+to the observation minus half the mean distance between distinct draws:
+
+| Cruise score term (equal-rig means) | Proposed | VAR-HSMM hybrid |
+|---|---:|---:|
+| Draw-to-measurement feature distance | 2.583 | 2.629 |
+| Ensemble-spread term, subtracted | 0.435 | 0.524 |
+| Fair ensemble score | 2.147 | 2.106 |
+
+Thus individual hybrid draws are **not** closer on average. Its wider
+distribution of spectral/level features more than offsets that penalty.
+The separate four-motor mean-speed score favours the proposed model on
+all 13 flights. An exact allocation of each Euclidean norm to blocks
+(`||difference_block||² / ||difference_full||`, zero for coincident
+points), applied to both energy-score terms, gives the following
+contributions to proposed minus hybrid: level −0.0080; spectral octaves
+in ascending order +0.0003, +0.0031, +0.0225, +0.0236. Auto-spectral
+entries sum to +0.0205 and cross-spectral entries to +0.0290. The latter
+encode power as well as relative phase, not isolated evidence about lag.
+
+The rig-level gaps are +0.0017 (MD2), +0.0469 (DREGON), +0.0757 (VID).
+On the middle window of VID `outdoor_8_yaw`, 2–4 Hz RMS speed fluctuation
+(square root of mean per-motor band power, median over draws for models)
+is 2.17 rev/s measured, 0.27 proposed, 0.34 hybrid. Both miss the
+excursions. For `indoor_loaded_8` it is 0.53, 1.31 and 1.36 respectively:
+both overshoot, and the proposed model wins the flight. On the middle
+DREGON `free-flight_speech-high_room1` window the values are 0.43, 0.53
+and 0.42. A three-state Markov hybrid scores 2.110, close to the HSMM's
+2.106; the comparison does not identify an explicit state-duration benefit.
+No generator, score or weighting rule was changed. Reproduce using
+`PYTHONPATH=src python -m experiments.rps_traj.cruise_diagnosis`
+under the single-thread limits below. `cruise_sections.html` in
+`results/rps_traj/regimes/schedule_eval/` shows every scored origin;
+`cruise_diagnosis.json` contains all component scores and band powers.
+
+**Unified successor experiment:** [one whole-flight likelihood, persistent targets, and an ordered-action hierarchy](unified-flight-response.md) compares the proposed replacement and its matched flat ablation against the frozen scores above. It uses a separate output directory; the template and its published results are unchanged.
+
 ### Does the fit run faster on a GPU?
 
 No. One objective-and-gradient evaluation of the Gaussian stage, 16 CPU
@@ -493,6 +804,14 @@ scripts/rps_traj_regimes_submit.sh all bench     # 7 uni-cpu jobs + 1 uni-gpusho
 # from .worktrees/submit-rps-regimes, per job: omnirun pull <job>, then copy
 # omnirun-outputs/<job>/results/rps_traj/regimes/ into results/rps_traj/regimes/
 python scripts/rps_traj_regimes.py table         # tables.md, summary.json, params/
+python scripts/rps_traj_regimes.py multiscale    # paired real-data gate; model scores only if passed
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python scripts/rps_traj_regimes.py spectral
+python scripts/rps_traj_regimes.py flight-inspector  # refresh telemetry in the existing flight_mds.html
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1
+python scripts/rps_traj_regimes.py schedule --controls-only
+python scripts/rps_traj_regimes.py schedule
+PYTHONPATH=src MPLBACKEND=Agg python -m experiments.rps_traj.schedule_summary
+cp results/rps_traj/regimes/schedule_eval/{schedule-table.tex,schedule-example.pdf} writing/papers/2026-08_wrapup/src/generator-assets/
 ```
 
 The Gaussian stage is the slowest unit (138–827 s a fold, table above).

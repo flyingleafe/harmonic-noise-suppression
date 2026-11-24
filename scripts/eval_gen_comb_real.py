@@ -784,7 +784,7 @@ def load_arm(exp: str, *, device: Any, checkpoint: str | None = None, cfg: Any =
     variant, scale = label_variant_of(cfg)
     _task, codec = build_task_and_codec(cfg.model)
     model = instantiate_model(cfg.model).to(device)
-    _warm_start(model, str(cfg.checkpoint), device)
+    _warm_start(model, str(cfg.checkpoint), device, artifacts_cfg=cfg.artifacts)
     # eval() is the deterministic render the readout needs: the emitter samples
     # rotor-speed jitter and random initial phases only while training
     # (models.generative.harmonic_gen_new: `do_jitter = self.training`,

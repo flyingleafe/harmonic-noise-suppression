@@ -83,7 +83,7 @@ def clock_lag(x, t0, tt, speed, a, b):
         )
         for lag in lags
     ]
-    return float(lags[int(np.argmax(score))])
+    return float(lags[int(np.argmax(np.asarray(score)))])
 
 
 def knee(t, e):

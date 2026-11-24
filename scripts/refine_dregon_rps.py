@@ -645,10 +645,15 @@ def stitch(
                 round(
                     float(
                         np.nanmean(
-                            [
-                                np.nanmean(np.asarray(r["scale_pct_per_rotor"], dtype=np.float64))
-                                for r in cruise
-                            ]
+                            np.asarray(
+                                [
+                                    np.nanmean(
+                                        np.asarray(r["scale_pct_per_rotor"], dtype=np.float64)
+                                    )
+                                    for r in cruise
+                                ],
+                                dtype=np.float64,
+                            )
                         )
                     ),
                     5,

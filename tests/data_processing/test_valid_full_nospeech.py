@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sized
 from pathlib import Path
 
 import numpy as np
@@ -47,7 +48,9 @@ def _valid_dataset(path: str, **overrides):
 
     spec = yaml.safe_load(Path(path).read_text())["valid"]
     spec["params"] = {**spec["params"], **overrides}
-    return build_dataset(spec)
+    dataset = build_dataset(spec)
+    assert isinstance(dataset, Sized), "the valid split is a map-style dataset"
+    return dataset
 
 
 def _rows(name: str) -> list[dict]:

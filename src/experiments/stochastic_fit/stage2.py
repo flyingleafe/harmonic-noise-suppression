@@ -288,7 +288,9 @@ def _resample_poly_taps(up: int, down: int, beta: float = 5.0) -> np.ndarray:
 
     max_rate = max(int(up), int(down))
     half_len = 10 * max_rate
-    taps = firwin(2 * half_len + 1, 1.0 / max_rate, window=("kaiser", float(beta))) * int(up)
+    # scipy's firwin is unannotated: pyright infers ``window: str`` from its default,
+    # but a (name, parameter) tuple is a documented window spec
+    taps = firwin(2 * half_len + 1, 1.0 / max_rate, window=("kaiser", float(beta))) * int(up)  # pyright: ignore[reportArgumentType]
     return np.asarray(taps, dtype=np.float64)
 
 
@@ -340,8 +342,10 @@ def render_transfer_power(
     # up == 1 for an integer decimation that is the work grid itself
     w_aa = 2.0 * np.pi * f / float(sample_rate_work)
     w_dec = 2.0 * np.pi * f / (float(sample_rate_work) * up)
-    h_aa = np.abs(freqz(aa, worN=w_aa)[1]) / np.abs(freqz(aa, worN=[0.0])[1][0])
-    h_dec = np.abs(freqz(dec, worN=w_dec)[1]) / np.abs(freqz(dec, worN=[0.0])[1][0])
+    # scipy's freqz is unannotated: pyright infers ``worN: int`` from its default,
+    # but an array of angular frequencies is a documented worN
+    h_aa = np.abs(freqz(aa, worN=w_aa)[1]) / np.abs(freqz(aa, worN=[0.0])[1][0])  # pyright: ignore[reportArgumentType]
+    h_dec = np.abs(freqz(dec, worN=w_dec)[1]) / np.abs(freqz(dec, worN=[0.0])[1][0])  # pyright: ignore[reportArgumentType]
     return (h_aa * h_dec) ** 2
 
 

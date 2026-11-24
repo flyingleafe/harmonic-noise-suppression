@@ -284,7 +284,7 @@ BATTERY_TERMS = (
     "level_distribution.spread_abs_diff_db",
     "level_distribution.mod_norm_abs_db",
 )
-BATTERY_WEIGHTS = dict.fromkeys(BATTERY_TERMS, 1.0)
+BATTERY_WEIGHTS: dict[str, float] = dict.fromkeys(BATTERY_TERMS, 1.0)
 BATTERY_FORMULA = (
     "D(theta) = sum_j w_j dbar_j(theta) / f_j over the terms j; dbar_j(theta) = (1 / (S K)) "
     "sum_i sum_k d_j(x_i, y_ik(theta)), x_i the real tuning segment i (8 mics, motors_command "
@@ -747,15 +747,16 @@ def fit_levels_floor(
     if data.floor is None or data.floor_centre_db is None:
         raise ValueError("the floor-mean refit needs LevelData.floor and floor_centre_db")
     mu0, sd_f = float(data.floor_centre_db), FLOOR_MEAN_PRIOR_SD_DB
+    e_floor = data.floor
     centre = np.asarray(data.centre_db, dtype=np.float64)
-    lines = data.frozen - data.floor
+    lines = data.frozen - e_floor
     t = np.asarray(transform, dtype=np.float64)[:, None, :]
 
     def floor_gain(mu: float) -> float:
         return 10.0 ** ((float(mu) - mu0) / 10.0)
 
     def total(levels: np.ndarray, mu: float) -> float:
-        model = lines + floor_gain(mu) * data.floor + 10.0 ** (levels / 10.0)[:, None, None] * t
+        model = lines + floor_gain(mu) * e_floor + 10.0 ** (levels / 10.0)[:, None, None] * t
         prior = 0.5 * float(np.sum(((levels - centre) / LEVEL_PRIOR_SD_DB) ** 2))
         prior += 0.5 * ((float(mu) - mu0) / sd_f) ** 2
         return float(composite_risk(data.power, model, data.weights)) + prior
@@ -765,13 +766,13 @@ def fit_levels_floor(
     fit: dict[str, Any] = {}
     mu_fun, mu_edge, converged = math.nan, False, False
     for sweep in range(INNER_MAX_SWEEPS):
-        frozen = lines + floor_gain(mu) * data.floor
+        frozen = lines + floor_gain(mu) * e_floor
         local = None if sweep == 0 else levels
         new_levels, fit = fit_levels(replace(data, frozen=frozen), transform, start=local)
         rest = lines + 10.0 ** (new_levels / 10.0)[:, None, None] * t
 
         def nll_mu(x: float, rest: np.ndarray = rest) -> float:
-            model = rest + floor_gain(x) * data.floor
+            model = rest + floor_gain(x) * e_floor
             return float(composite_risk(data.power, model, data.weights)) + (
                 0.5 * ((float(x) - mu0) / sd_f) ** 2
             )
@@ -1506,9 +1507,11 @@ def battery_point(
         ctx.stage, unit_block, n_fft=ctx.level.n_fft, sr=ctx.level.sr, band=ctx.level.band
     )
     levels, mu, inner = fit_levels_floor(ctx.level, tw)
+    centre_db = ctx.level.floor_centre_db
+    assert centre_db is not None  # fit_levels_floor refuses a LevelData without it
     t_inner = time.time() - t0 - t_shape
     pay = with_wind(ctx.stage, sc_block(levels, offset, scale, rate, shape))
-    amp = 10.0 ** ((mu - float(ctx.level.floor_centre_db)) / 20.0)
+    amp = 10.0 ** ((mu - float(centre_db)) / 20.0)
     n = int(ctx.real.shape[-1])
     terms, summaries = [], []
     t_render = t_battery = 0.0
@@ -1537,7 +1540,7 @@ def battery_point(
             source_law=bool(source),
             level_db=levels,
             floor_mean_db=float(mu),
-            floor_shift_db=float(mu - float(ctx.level.floor_centre_db)),
+            floor_shift_db=float(mu - float(centre_db)),
             inner=inner,
             objective=obj["total"],
             objective_terms=obj,
@@ -1609,7 +1612,7 @@ def build_battery_context(
     band_hz = (float(stage["band_hz"][0]), float(stage["band_hz"][1]))
     band = np.flatnonzero((f >= band_hz[0]) & (f <= band_hz[1]))
     nowind = with_wind(stage, None)
-    kw = dict(n_fft=fp.n_fft, sr=fp.sr, band=band, progress=progress * 50)
+    kw: dict[str, Any] = dict(n_fft=fp.n_fft, sr=fp.sr, band=band, progress=progress * 50)
     frozen = frozen_expectation(nowind, fp.rps[:, keep], **kw)
     lines = frozen_expectation(DF.silent_floor(nowind), fp.rps[:, keep], **kw)
     if progress:
@@ -1685,7 +1688,7 @@ def split_base_unit(unit: Unit) -> dict[str, Any]:
     t0 = time.time()
     seed = base_seed(i, k)
     nowind = with_wind(stage, None)
-    kw = dict(sr=int(meta["sr"]), n_mics=int(meta["n_mics"]), seed=seed)
+    kw: dict[str, Any] = dict(sr=int(meta["sr"]), n_mics=int(meta["n_mics"]), seed=seed)
     full = render_noise(nowind, rps, **kw)
     lines = render_noise(DF.silent_floor(nowind), rps, **kw)
     floor = full - lines
@@ -1805,7 +1808,9 @@ def _run_until(
     instant) in chunks of ``workers`` units, none launched when it would end
     past the deadline (its estimate: the slowest chunk so far). ``(every unit
     finished or failed, the number failed)``; a rerun resumes."""
-    kw = dict(jobs=int(workers), resume=resume, summarize=summarize, verbose=verbose)
+    kw: dict[str, Any] = dict(
+        jobs=int(workers), resume=resume, summarize=summarize, verbose=verbose
+    )
     if deadline is None:
         return True, run_grid(units, worker, out_dir, **kw).n_failed
     todo = [u for u in units if not (resume and unit_path(out_dir, u.uid).exists())]
@@ -1905,7 +1910,7 @@ def run_gust_stage(
     build_battery_context(work, stage, max_segments=max_segments, pool=pool_used, progress=progress)
     _, meta, _ = _battery_inputs(str(work))
     n_seg, verbose = len(meta["segments"]), bool(progress)
-    run = dict(workers=workers, resume=resume, deadline=deadline, verbose=verbose)
+    run: dict[str, Any] = dict(workers=workers, resume=resume, deadline=deadline, verbose=verbose)
     base_units = [
         Unit(f"seg{i}__seed{k}", dict(work=str(work), segment=i, seed=k))
         for i in range(n_seg)
@@ -1951,6 +1956,9 @@ def run_gust_stage(
     best = min(rows, key=lambda r: float(r["objective"]))
     src_rows = [r for r in rows if r["source_law"]]
     src_row = src_rows[0] if src_rows else None
+    # grid_laws flags a source row only when the stage's wind is sc, i.e. has a law
+    src_law = None if src_row is None else source_law(stage)
+    assert src_row is None or src_law is not None
     pay = gust_payload(stage, best)
     check = wind_renderer_check(pay, n_seeds=int(check_seeds))
     pay_path, report_path = out / f"{stem}.json", out / f"{stem}.grid.json"
@@ -2018,7 +2026,7 @@ def run_gust_stage(
                 speed_scale_ms=list(scales),
                 gust_rate_hz=list(rates),
             ),
-            source_law=None if src_row is None else list(source_law(stage)),
+            source_law=None if src_law is None else list(src_law),
             seeds=int(seeds),
             base_seed=BASE_SEED,
             wind_seed=WIND_SEED,

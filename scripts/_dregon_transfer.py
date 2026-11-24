@@ -221,7 +221,8 @@ def main() -> None:
     flight_fit = json.loads(args.flight_fit.read_text()) if args.flight_fit else None
     helpers = _probe_helpers()
     fm = zoo.load(MODEL, ckpt="best")
-    metric = LayerPeakRPSMetric()
+    # hppnet_l2_r2_s0's output grid (conf/metrics/salience_layers_r150.yaml)
+    metric = LayerPeakRPSMetric(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
     OUT.mkdir(parents=True, exist_ok=True)
     RESULTS.mkdir(parents=True, exist_ok=True)
 

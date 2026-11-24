@@ -13,6 +13,8 @@ This design allows training encoder-only baselines and adding decoder RPS later,
 which is useful for analyzing where RPS helps most in the pipeline.
 """
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -123,7 +125,7 @@ class RotorEncoder(nn.Module):
         nn.init.xavier_uniform_(self.conv1.weight)
         nn.init.xavier_uniform_(self.conv2.weight)
 
-    def forward(self, rps: torch.Tensor, target_length: int = None) -> torch.Tensor:
+    def forward(self, rps: torch.Tensor, target_length: int | None = None) -> torch.Tensor:
         """
         Args:
             rps: (B, num_rotors, time_rps) or (B, time_rps) [then unsqueeze(1)]
@@ -427,6 +429,7 @@ class Decoder(nn.Module):
     def forward(self, x):
         x = self.cconvt(x)
         if not self.last_layer:
+            assert self.cbn is not None and self.act is not None
             x = self.cbn(x)
             x = self.act(x)
         else:
@@ -442,6 +445,7 @@ class Decoder(nn.Module):
         # rps_inject should have shape matching x after transposed conv
         x = x + rps_inject
         if not self.last_layer:
+            assert self.cbn is not None and self.act is not None
             x = self.cbn(x)
             x = self.act(x)
         else:
@@ -471,7 +475,7 @@ class DecoderModule(nn.Module):
         bottleneck_channels: int,
         layer_specs: list,
         num_rotors: int = 4,
-        rps_fusion: str = None,
+        rps_fusion: str | None = None,
         rps_channels: int = 64,
     ):
         """
@@ -524,7 +528,9 @@ class DecoderModule(nn.Module):
             in_ch = out_ch * 2 if i < len(layer_specs) - 1 else out_ch  # double for skip concat
 
         # RPS fusion modules
-        self.rps_fusion_module = None
+        self.rps_fusion_module: DecoderBottleneckRPSFusion | DecoderHierarchicalRPSFusion | None = (
+            None
+        )
         self.decoder_input_channels = []  # Store for debugging
         if rps_fusion == "bottleneck":
             # Bottleneck fusion: inject RPS at first decoder level (matching bottleneck channels)
@@ -546,7 +552,10 @@ class DecoderModule(nn.Module):
             )
 
     def forward(
-        self, bottleneck: torch.Tensor, skip_connections: list, rps: torch.Tensor = None
+        self,
+        bottleneck: torch.Tensor,
+        skip_connections: list,
+        rps: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -616,9 +625,11 @@ class DecoderModule(nn.Module):
         Output: RPS injection of same shape
         """
         B, C, F, T, _ = x.shape
-        rps_feat = self.rps_fusion_module.rotor_encoder(rps, target_length=T)  # (B, 64, T)
+        fusion = self.rps_fusion_module
+        assert isinstance(fusion, DecoderBottleneckRPSFusion)
+        rps_feat = fusion.rotor_encoder(rps, target_length=T)  # (B, 64, T)
         # Conv1d: (B, 64, T) -> (B, C*2, T)
-        rps_proj = self.rps_fusion_module.rps_proj(rps_feat)  # (B, C*2, T)
+        rps_proj = fusion.rps_proj(rps_feat)  # (B, C*2, T)
         # Reshape to (B, C, 2, T) then permute to (B, C, T, 2)
         rps_proj = rps_proj.reshape(B, C, 2, T).permute(0, 1, 3, 2)  # (B, C, T, 2)
         # Broadcast to (B, C, F, T, 2)
@@ -634,8 +645,10 @@ class DecoderModule(nn.Module):
         Output: RPS injection of same shape
         """
         B, C, F, T, _ = x.shape
-        rps_feat = self.rps_fusion_module.rotor_encoder(rps, target_length=T)  # (B, 64, T)
-        proj = self.rps_fusion_module.level_projs[level]
+        fusion = self.rps_fusion_module
+        assert isinstance(fusion, DecoderHierarchicalRPSFusion)
+        rps_feat = fusion.rotor_encoder(rps, target_length=T)  # (B, 64, T)
+        proj = fusion.level_projs[level]
         # Conv1d: (B, 64, T) -> (B, C*2, T)
         rps_proj = proj(rps_feat)  # (B, C*2, T)
         # Reshape to (B, C, 2, T) then permute to (B, C, T, 2)
@@ -799,7 +812,9 @@ class DCUNetRefactored(nn.Module):
                 enc_channels, target_t, num_rotors=self.num_rotors
             )
 
-    def forward(self, x: torch.Tensor, rps: torch.Tensor = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, rps: torch.Tensor | None = None
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             x: (B, 1, time) audio input
@@ -810,8 +825,8 @@ class DCUNetRefactored(nn.Module):
             If predict_rps=True, also returns (B, num_rotors, target_t) RPS prediction
         """
         input_length = x.shape[-1]
-        X = self.stft.transform(x)  # (B, 1, F, T, 2)
-        B, _, F, T, _ = X.shape
+        X = self.stft.transform(x)  # (B, 1, F_stft, T, 2)
+        B, _, F_stft, T, _ = X.shape
 
         # Encode (clean, no RPS)
         bottleneck, encoder_features = self.encoder(X)
@@ -826,13 +841,13 @@ class DCUNetRefactored(nn.Module):
         decoded = self.decoder(bottleneck, encoder_features, rps)
 
         # Pad or crop output to match input spectrogram dimensions
-        if decoded.shape[2] != F or decoded.shape[3] != T:
-            pad_f = F - decoded.shape[2]
+        if decoded.shape[2] != F_stft or decoded.shape[3] != T:
+            pad_f = F_stft - decoded.shape[2]
             pad_t = T - decoded.shape[3]
             if pad_f > 0 or pad_t > 0:
                 decoded = F.pad(decoded, (0, 0, 0, max(0, pad_t), 0, max(0, pad_f)))
             if pad_f < 0 or pad_t < 0:
-                decoded = decoded[:, :, :F, :T, :]
+                decoded = decoded[:, :, :F_stft, :T, :]
 
         # Apply mask and inverse STFT
         output = decoded * X
@@ -961,7 +976,9 @@ class DCCRNRefactored(nn.Module):
                 encoder_channels, target_t, num_rotors=self.num_rotors
             )
 
-    def forward(self, x: torch.Tensor, rps: torch.Tensor = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, rps: torch.Tensor | None = None
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             x: (B, 1, time) audio input
@@ -1038,7 +1055,7 @@ def _get_config_val(config, key, default=None):
 # =============================================================================
 
 if __name__ == "__main__":
-    config = {
+    config: dict[str, Any] = {
         "audio": {
             "chunk_size": 131584,
             "dim_f": 1024,

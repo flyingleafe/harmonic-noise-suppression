@@ -1,5 +1,8 @@
 """The slot model must contain the deployed peel and keep its claims honest."""
+
 from __future__ import annotations
+
+from typing import cast
 
 import numpy as np
 import torch
@@ -31,7 +34,7 @@ def test_identical_rotors_leave_the_ranking_intact():
     a, _, _ = comb_clip(seed=7, spread=0.0)
     au = torch.tensor(a, dtype=torch.float32)[None]
     with torch.no_grad():
-        pw = net.spectrum(au)
+        pw = cast(torch.Tensor, net.spectrum(au))
         floor = torch.ones_like(pw) * 1e-6
         one = torch.zeros(1, net.gather.n_grid, pw.shape[-1])
         one[:, 90] = 1.0
@@ -57,7 +60,7 @@ def test_union_prefers_a_new_rotor_over_a_duplicate():
     a, rps, _ = comb_clip(seed=7, spread=11.0)
     au = torch.tensor(a, dtype=torch.float32)[None]
     with torch.no_grad():
-        pw = net.spectrum(au)
+        pw = cast(torch.Tensor, net.spectrum(au))
         floor = torch.ones_like(pw) * float(pw.median())
         n_t = pw.shape[-1]
         grid = net.grid.numpy()
@@ -73,7 +76,7 @@ def test_union_prefers_a_new_rotor_over_a_duplicate():
         new = net.union_evidence(pw, floor, torch.cat([claim(r0), claim(r1)], 1))
     gain_dup = float(dup - base)
     gain_new = float(new - base)
-    assert gain_new > 2.0 * gain_dup > 0.0   # measured 3.5x
+    assert gain_new > 2.0 * gain_dup > 0.0  # measured 3.5x
 
 
 def test_decode_shapes_and_sorting():

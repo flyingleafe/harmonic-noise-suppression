@@ -35,6 +35,8 @@ in the family's parameter space rather than a baseline beside it.
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -76,9 +78,21 @@ class CombGather(nn.Module):
         f_max: harmonics at or above this frequency are dropped.
     """
 
+    grid: torch.Tensor
+    bin_lo: torch.Tensor
+    bin_frac: torch.Tensor
+    valid: torch.Tensor
+    count: torch.Tensor
+
     def __init__(
-        self, r_lo: float = 30.0, r_hi: float = 100.0, n_grid: int = 512,
-        k_max: int = 40, sr: int = 16000, n_fft: int = 4096, f_max: float = 7500.0,
+        self,
+        r_lo: float = 30.0,
+        r_hi: float = 100.0,
+        n_grid: int = 512,
+        k_max: int = 40,
+        sr: int = 16000,
+        n_fft: int = 4096,
+        f_max: float = 7500.0,
         grid=None,
     ):
         super().__init__()
@@ -94,7 +108,7 @@ class CombGather(nn.Module):
             grid = torch.as_tensor(grid, dtype=torch.float64)
         self.n_grid = int(grid.numel())
         ks = torch.arange(1, self.k_max + 1, dtype=torch.float64)
-        fk = ks[:, None] * grid[None, :]                      # (K, G) Hz
+        fk = ks[:, None] * grid[None, :]  # (K, G) Hz
         df = float(sr) / float(n_fft)
         # Split the interpolation into an integer bin and a fraction ONCE, and
         # compute the fraction as `(f - lo*df) / df` rather than `f/df - lo`.
@@ -105,19 +119,20 @@ class CombGather(nn.Module):
         lo = torch.floor(pos)
         frac = (fk - lo * df) / df
         self.register_buffer("grid", grid, persistent=False)
-        self.register_buffer("bin_lo", lo.long(), persistent=False)     # (K, G)
-        self.register_buffer("bin_frac", frac, persistent=False)        # (K, G)
+        self.register_buffer("bin_lo", lo.long(), persistent=False)  # (K, G)
+        self.register_buffer("bin_frac", frac, persistent=False)  # (K, G)
         self.register_buffer("valid", (fk < self.f_max).to(torch.float64), persistent=False)
-        self.register_buffer("count", (fk < self.f_max).to(torch.float64).sum(0).clamp_min(1.0),
-                             persistent=False)
+        self.register_buffer(
+            "count", (fk < self.f_max).to(torch.float64).sum(0).clamp_min(1.0), persistent=False
+        )
 
     def forward(self, pw: torch.Tensor) -> torch.Tensor:
         b, n_f, n_t = pw.shape
         lo = self.bin_lo.reshape(-1).clamp(0, n_f - 2)
-        frac = self.bin_frac.reshape(-1).to(pw.dtype)[None, :, None]    # (1, K*G, 1)
+        frac = self.bin_frac.reshape(-1).to(pw.dtype)[None, :, None]  # (1, K*G, 1)
         a = pw[:, lo, :]
         c = pw[:, (lo + 1).clamp(max=n_f - 1), :]
-        h = a + (c - a) * frac                                          # (B, K*G, T)
+        h = a + (c - a) * frac  # (B, K*G, T)
         return h.view(b, self.k_max, self.n_grid, n_t) * self.valid.to(pw.dtype)[None, :, :, None]
 
 
@@ -135,8 +150,11 @@ class CombScoreHead(nn.Module):
     classical score and can only depart from it if that helps.
     """
 
-    def __init__(self, k_max: int = 40, mode: str = "classical", n_knots: int = 8,
-                 z_max: float = 12.0):
+    knots: torch.Tensor
+
+    def __init__(
+        self, k_max: int = 40, mode: str = "classical", n_knots: int = 8, z_max: float = 12.0
+    ):
         super().__init__()
         if mode not in ("classical", "learned", "learned_cond"):
             raise ValueError(f"unknown mode {mode!r}")
@@ -150,8 +168,9 @@ class CombScoreHead(nn.Module):
             # the training-matched cell from 0.160 to 8.042. One global vector
             # cannot serve both, and the loss fell throughout.
             self.cond = nn.Sequential(nn.Linear(2, 32), nn.GELU(), nn.Linear(32, 1))
-            nn.init.zeros_(self.cond[2].weight)
-            nn.init.zeros_(self.cond[2].bias)
+            last = cast(nn.Linear, self.cond[2])
+            nn.init.zeros_(last.weight)
+            nn.init.zeros_(last.bias)
             self.register_buffer("knots", torch.linspace(0.0, z_max, n_knots))
             self.slope = nn.Parameter(torch.zeros(n_knots))
         elif mode == "learned":
@@ -176,8 +195,13 @@ class CombScoreHead(nn.Module):
         a = self.slope.to(z.dtype)
         return z + torch.einsum("j,...j->...", a, F.relu(z.unsqueeze(-1) - k))
 
-    def forward(self, h: torch.Tensor, floor: torch.Tensor, count: torch.Tensor,
-                grid: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        h: torch.Tensor,
+        floor: torch.Tensor,
+        count: torch.Tensor,
+        grid: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         # floor: (B, F, T) -> gathered alongside h by the caller, already (B,K,G,T)
         z = torch.log1p(h / floor)
         cnt = count.to(z.dtype)[None, :, None]
@@ -190,7 +214,7 @@ class CombScoreHead(nn.Module):
             lr = torch.log(grid.to(z.dtype).clamp_min(1e-6))
             lr = (lr - lr.mean()) / lr.std().clamp_min(1e-6)
             feat = torch.stack(torch.broadcast_tensors(k[:, None], lr[None, :]), dim=-1)
-            w = (1.0 + self.cond(feat).squeeze(-1))[None, :, :, None]      # (1, K, G, 1)
+            w = (1.0 + self.cond(feat).squeeze(-1))[None, :, :, None]  # (1, K, G, 1)
             return (self._warp(z) * w).sum(dim=1) / cnt
         w = (1.0 + self.w).to(z.dtype)[None, :, None, None]
         return (self._warp(z) * w).sum(dim=1) / cnt
@@ -209,10 +233,19 @@ class CombSalienceNet(nn.Module):
     learned parameters at all.
     """
 
+    window: torch.Tensor
+
     def __init__(
-        self, sr: int = 16000, n_fft: int = 4096, hop_length: int = 512,
-        r_lo: float = 30.0, r_hi: float = 100.0, n_grid: int = 700,
-        k_max: int = 32, f_max: float = 7500.0, head_mode: str = "learned",
+        self,
+        sr: int = 16000,
+        n_fft: int = 4096,
+        hop_length: int = 512,
+        r_lo: float = 30.0,
+        r_hi: float = 100.0,
+        n_grid: int = 700,
+        k_max: int = 32,
+        f_max: float = 7500.0,
+        head_mode: str = "learned",
         floor_hz: float = 120.0,
     ):
         super().__init__()
@@ -230,9 +263,14 @@ class CombSalienceNet(nn.Module):
         """Audio -> power spectrogram ``(B, F, T)``."""
         if audio.dim() == 3:
             audio = audio.squeeze(1)
-        spec = torch.stft(audio, n_fft=self.n_fft, hop_length=self.hop_length,
-                          window=self.window.to(audio.dtype), center=True,
-                          return_complex=True)
+        spec = torch.stft(
+            audio,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=self.window.to(audio.dtype),
+            center=True,
+            return_complex=True,
+        )
         return spec.real.pow(2) + spec.imag.pow(2)
 
     def score(self, pw: torch.Tensor, floor: torch.Tensor | None = None) -> torch.Tensor:
@@ -255,8 +293,9 @@ class CombSalienceNet(nn.Module):
     def forward(self, audio: torch.Tensor) -> torch.Tensor:
         return self.score(self.spectrum(audio))
 
-    def notch(self, pw: torch.Tensor, rate: torch.Tensor, width_bins: float = 1.5,
-              depth: float = 1.0) -> torch.Tensor:
+    def notch(
+        self, pw: torch.Tensor, rate: torch.Tensor, width_bins: float = 1.5, depth: float = 1.0
+    ) -> torch.Tensor:
         """Suppress the comb at ``rate`` ``(B, T)`` in ``pw`` ``(B, F, T)``.
 
         A soft Gaussian notch at every harmonic, down to the local floor. This
@@ -272,14 +311,15 @@ class CombSalienceNet(nn.Module):
         mask = torch.ones_like(pw)
         ks = torch.arange(1, self.gather.k_max + 1, device=pw.device, dtype=pw.dtype)
         for k in ks:
-            centre = (k * rate / df).unsqueeze(1)                     # (B, 1, T)
+            centre = (k * rate / df).unsqueeze(1)  # (B, 1, T)
             g = torch.exp(-0.5 * ((fbin - centre) / width_bins) ** 2)
             mask = mask * (1.0 - depth * g)
         return pw * mask + floor * (1.0 - mask)
 
 
-def _gather_at(pw: torch.Tensor, rate: torch.Tensor, k_max: int, sr: int,
-               n_fft: int, f_max: float) -> tuple[torch.Tensor, torch.Tensor]:
+def _gather_at(
+    pw: torch.Tensor, rate: torch.Tensor, k_max: int, sr: int, n_fft: int, f_max: float
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Read ``pw`` ``(B, F, T)`` at harmonics of a PER-FRAME rate ``(B, T)``.
 
     The grid gather serves a fixed set of candidates; this serves one rate that
@@ -288,7 +328,7 @@ def _gather_at(pw: torch.Tensor, rate: torch.Tensor, k_max: int, sr: int,
     b, n_f, n_t = pw.shape
     df = sr / n_fft
     ks = torch.arange(1, k_max + 1, device=pw.device, dtype=pw.dtype)
-    fk = ks[None, :, None] * rate[:, None, :]                        # (B, K, T)
+    fk = ks[None, :, None] * rate[:, None, :]  # (B, K, T)
     pos = (fk / df).clamp(0, n_f - 2)
     lo = pos.floor().long()
     frac = pos - lo.to(pos.dtype)
@@ -298,9 +338,18 @@ def _gather_at(pw: torch.Tensor, rate: torch.Tensor, k_max: int, sr: int,
 
 
 def octave_fix(
-    pw: torch.Tensor, floor: torch.Tensor, rate: torch.Tensor, k_max: int, sr: int,
-    n_fft: int, f_max: float, ratio: float = 0.6, r_hi: float = 100.0,
-    r_lo: float = 30.0, max_mult: int = 2, mode: str = 'scored',
+    pw: torch.Tensor,
+    floor: torch.Tensor,
+    rate: torch.Tensor,
+    k_max: int,
+    sr: int,
+    n_fft: int,
+    f_max: float,
+    ratio: float = 0.6,
+    r_hi: float = 100.0,
+    r_lo: float = 30.0,
+    max_mult: int = 2,
+    mode: str = "scored",
 ) -> torch.Tensor:
     """Raise a pick off a subharmonic, by the odd-to-even evidence ratio.
 
@@ -316,6 +365,7 @@ def octave_fix(
     its own lines and the ratio is near one. A ratio needs no absolute
     threshold, which is what makes it usable.
     """
+
     def _lev(r: torch.Tensor):
         h, ok = _gather_at(pw, r, k_max, sr, n_fft, f_max)
         fh, _ = _gather_at(floor, r, k_max, sr, n_fft, f_max)
@@ -360,7 +410,7 @@ def octave_fix(
         # here instead was measured to fire spuriously at a 75 rev/s centre and
         # cost the cells that already worked (0.209 -> 0.740).
         take = (oe(half) >= ratio) & (half >= r_lo)
-        if mode == 'scored':
+        if mode == "scored":
             take = take & (sc(half) > sc(cur))
         if not bool(take.any()):
             break
@@ -375,8 +425,12 @@ def octave_fix(
 
 
 def decode_peel(
-    model: CombSalienceNet, audio: torch.Tensor, n_rot: int = 4,
-    width_bins: float = 1.5, refine: bool = True, octave: bool = True,
+    model: CombSalienceNet,
+    audio: torch.Tensor,
+    n_rot: int = 4,
+    width_bins: float = 1.5,
+    refine: bool = True,
+    octave: bool = True,
     octave_mode: str = "scored",
 ) -> torch.Tensor:
     """Peel ``n_rot`` combs out of one clip: rates ``(B, n_rot, T)``.
@@ -394,7 +448,7 @@ def decode_peel(
     picks = []
     for _ in range(n_rot):
         sal = model.score(pw, floor)
-        idx = sal.argmax(dim=1)                                       # (B, T)
+        idx = sal.argmax(dim=1)  # (B, T)
         if refine:
             g = sal.shape[1]
             i0 = idx.clamp(1, g - 2)
@@ -407,18 +461,29 @@ def decode_peel(
         else:
             r = grid[idx]
         if octave:
-            r = octave_fix(pw, floor, r, model.gather.k_max, model.sr,
-                           model.n_fft, model.gather.f_max,
-                           r_hi=float(model.grid[-1]), r_lo=float(model.grid[0]),
-                           mode=octave_mode)
+            r = octave_fix(
+                pw,
+                floor,
+                r,
+                model.gather.k_max,
+                model.sr,
+                model.n_fft,
+                model.gather.f_max,
+                r_hi=float(model.grid[-1]),
+                r_lo=float(model.grid[0]),
+                mode=octave_mode,
+            )
         picks.append(r)
         pw = model.notch(pw, r, width_bins=width_bins)
     return torch.stack(picks, dim=1).sort(dim=1).values
 
 
 def decode_topr(
-    sal: torch.Tensor, grid: torch.Tensor, n_rot: int = 4,
-    min_sep: float = 0.6, refine: bool = True,
+    sal: torch.Tensor,
+    grid: torch.Tensor,
+    n_rot: int = 4,
+    min_sep: float = 0.6,
+    refine: bool = True,
 ) -> torch.Tensor:
     """Salience ``(B, G, T)`` -> rates ``(B, n_rot, T)``, sorted ascending.
 
@@ -433,7 +498,7 @@ def decode_topr(
     out = sal.new_zeros(b, n_rot, t)
     work = sal.clone()
     for r in range(n_rot):
-        idx = work.argmax(dim=1)                                     # (B, T)
+        idx = work.argmax(dim=1)  # (B, T)
         if refine:
             i0 = idx.clamp(1, g - 2)
             a = torch.gather(sal, 1, (i0 - 1).unsqueeze(1)).squeeze(1)
@@ -446,14 +511,20 @@ def decode_topr(
             out[:, r] = grid.to(sal.dtype)[idx]
         lo = (idx - sep).clamp(0, g - 1)
         ar = torch.arange(g, device=sal.device)[None, :, None]
-        work = work.masked_fill((ar >= lo.unsqueeze(1)) & (ar <= (idx + sep).clamp(0, g - 1).unsqueeze(1)),
-                                float("-inf"))
+        work = work.masked_fill(
+            (ar >= lo.unsqueeze(1)) & (ar <= (idx + sep).clamp(0, g - 1).unsqueeze(1)),
+            float("-inf"),
+        )
     return out.sort(dim=1).values
 
 
 def decode_peaks(
-    sal: torch.Tensor, grid: torch.Tensor, n_rot: int = 4,
-    rel: float = 0.9, guard: int = 1, refine: bool = True,
+    sal: torch.Tensor,
+    grid: torch.Tensor,
+    n_rot: int = 4,
+    rel: float = 0.9,
+    guard: int = 1,
+    refine: bool = True,
 ) -> torch.Tensor:
     """Salience ``(B, G, T)`` -> rates ``(B, n_rot, T)``, sorted ascending.
 
@@ -481,7 +552,7 @@ def decode_peaks(
     work = masked.clone()
     first_val = None
     for r in range(n_rot):
-        val, idx = work.max(dim=1)                                   # (B, T)
+        val, idx = work.max(dim=1)  # (B, T)
         if first_val is None:
             first_val, first_idx = val, idx
         else:
@@ -505,9 +576,15 @@ def decode_peaks(
 
 
 def decode_peel_viterbi(
-    model: CombSalienceNet, audio: torch.Tensor, n_rot: int = 4,
-    width_bins: float = 1.5, octave: bool = True, octave_mode: str = "scored",
-    slew: float = 12.0, stiff: float = 40.0, hop_s: float | None = None,
+    model: CombSalienceNet,
+    audio: torch.Tensor,
+    n_rot: int = 4,
+    width_bins: float = 1.5,
+    octave: bool = True,
+    octave_mode: str = "scored",
+    slew: float = 12.0,
+    stiff: float = 40.0,
+    hop_s: float | None = None,
 ) -> torch.Tensor:
     """Peel, but take each rotor as a SMOOTH PATH rather than a per-frame argmax.
 
@@ -529,16 +606,25 @@ def decode_peel_viterbi(
     dt = hop_s if hop_s is not None else model.hop_length / model.sr
     picks = []
     for _ in range(n_rot):
-        sal = model.score(pw, floor)                                  # (B, G, T)
+        sal = model.score(pw, floor)  # (B, G, T)
         rows = []
         for b in range(sal.shape[0]):
             idx = _viterbi_ridge(sal[b].detach().cpu().numpy().T, grid_np, slew, dt, stiff)
             rows.append(torch.as_tensor(grid_np[idx], dtype=pw.dtype, device=pw.device))
-        r = torch.stack(rows)                                         # (B, T)
+        r = torch.stack(rows)  # (B, T)
         if octave:
-            r = octave_fix(pw, floor, r, model.gather.k_max, model.sr, model.n_fft,
-                           model.gather.f_max, r_hi=float(model.grid[-1]),
-                           r_lo=float(model.grid[0]), mode=octave_mode)
+            r = octave_fix(
+                pw,
+                floor,
+                r,
+                model.gather.k_max,
+                model.sr,
+                model.n_fft,
+                model.gather.f_max,
+                r_hi=float(model.grid[-1]),
+                r_lo=float(model.grid[0]),
+                mode=octave_mode,
+            )
         picks.append(r)
         pw = model.notch(pw, r, width_bins=width_bins)
     return torch.stack(picks, dim=1).sort(dim=1).values

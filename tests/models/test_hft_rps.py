@@ -8,14 +8,37 @@ claim itself — a rate token must attend to nothing outside its own harmonics.
 
 from __future__ import annotations
 
+from typing import TypedDict
+
 import numpy as np
 import pytest
 import torch
 
 from losses.salience import salience_bce_loss
-from models.harmonic_ports.hft_rps import HFTRPS
+from models.harmonic_ports.hft_rps import HFTRPS, BiasedCrossAttentionLayer
 
-SMALL = dict(hid_dim=32, n_layers=2, n_time_layers=1, n_heads=2, pf_dim=64, dropout=0.0)
+
+class HFTKwargs(TypedDict, total=False):
+    """The `HFTRPS` constructor arguments these tests override."""
+
+    hid_dim: int
+    n_layers: int
+    n_time_layers: int
+    n_heads: int
+    pf_dim: int
+    dropout: float
+    attn_mode: str
+    n_enc_layers: int
+
+
+SMALL: HFTKwargs = {
+    "hid_dim": 32,
+    "n_layers": 2,
+    "n_time_layers": 1,
+    "n_heads": 2,
+    "pf_dim": 64,
+    "dropout": 0.0,
+}
 
 
 def comb(rate: float, n: int = 16000, sr: int = 16000, k_max: int = 40, seed: int = 0):
@@ -36,6 +59,7 @@ def test_shapes_and_grid():
         y = m(torch.randn(2, n), return_attention=True)
     assert y.shape == (2, 300, m.num_grid_frames(n))
     assert m.outputs_salience is True
+    assert m.last_attention is not None
     assert m.last_attention.shape == (2, y.shape[-1], 2, 300, 32)  # hFT's layout
     freqs = m.output_freqs()
     assert freqs.shape == (300,) and freqs[0] == 0.0 and freqs[-1] == 150.0
@@ -83,6 +107,7 @@ def test_attention_is_hard_sparse_outside_the_band():
     with torch.no_grad():
         m(comb(60.0).unsqueeze(0), return_attention=True)
     attn = m.last_attention  # (B, T, H, G, K)
+    assert attn is not None
     dead = ~m.band.t()  # (G, K): harmonic k of rate g is outside the band
     assert float(attn[:, :, :, dead].abs().max()) == 0.0
     live = m.any_band  # (G,): rates with at least one usable harmonic
@@ -122,7 +147,7 @@ def test_time_axis_is_preserved_across_block_boundaries(n_samples):
 
 # ── variant (ii): gather-as-bias ────────────────────────────────────────────
 
-BIAS = dict(SMALL, attn_mode="bias", n_enc_layers=2)
+BIAS: HFTKwargs = {**SMALL, "attn_mode": "bias", "n_enc_layers": 2}
 
 
 def test_bias_variant_shapes_and_gradients():
@@ -136,8 +161,10 @@ def test_bias_variant_shapes_and_gradients():
     m = HFTRPS(**BIAS)
     y = m(torch.randn(2, 16000), return_attention=True)
     assert y.shape == (2, 300, m.num_grid_frames(16000))
-    assert m.last_attention.shape == (2, y.shape[-1], 2, 300, 256)
-    mass = m.last_attention.sum(-1)
+    attn = m.last_attention
+    assert attn is not None
+    assert attn.shape == (2, y.shape[-1], 2, 300, 256)
+    mass = attn.sum(-1)
     assert torch.allclose(mass, torch.ones_like(mass), atol=1e-5)
     target = torch.zeros_like(y)
     target[:, 120, :] = 1.0
@@ -155,7 +182,9 @@ def test_bias_initialization_prefers_the_rates_own_harmonics():
     carries a positive bias and every other token carries exactly zero.
     """
     m = HFTRPS(**BIAS).eval()
-    bias = m.layers[0].bias[0].detach()  # (G, n_bin)
+    layer = m.layers[0]
+    assert isinstance(layer, BiasedCrossAttentionLayer)
+    bias = layer.bias[0].detach()  # (G, n_bin)
     df = 16000 / 4096
     grid = m.output_freqs()
     for g in (60, 120, 240):

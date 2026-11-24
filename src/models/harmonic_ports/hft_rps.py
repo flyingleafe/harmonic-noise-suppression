@@ -335,6 +335,7 @@ class FrequencyEncoder(nn.Module):
         super().__init__()
         self.n_bin = int(n_bin)
         self.ctx = nn.Conv1d(1, cnn_channel, cnn_kernel, padding=cnn_kernel // 2)
+        assert self.ctx.bias is not None  # Conv1d is built with bias=True
         with torch.no_grad():
             self.ctx.weight.zero_()
             self.ctx.weight[0, 0, cnn_kernel // 2] = 1.0
@@ -495,6 +496,10 @@ class HFTRPS(LayerCRFReadout, SalienceRPSPredictor):
             the scale of the log-incidence bias initialization.
     """
 
+    band: torch.Tensor
+    any_band: torch.Tensor
+    window: torch.Tensor
+
     def __init__(
         self,
         n_fft: int = 4096,
@@ -577,6 +582,7 @@ class HFTRPS(LayerCRFReadout, SalienceRPSPredictor):
         self.ctx: nn.Conv1d | None = None
         if attn_mode == "gather":
             self.ctx = nn.Conv1d(1, self.cnn_channel, cnn_kernel, padding=cnn_kernel // 2)
+            assert self.ctx.bias is not None  # Conv1d is built with bias=True
             with torch.no_grad():
                 self.ctx.weight.zero_()
                 self.ctx.weight[0, 0, cnn_kernel // 2] = 1.0

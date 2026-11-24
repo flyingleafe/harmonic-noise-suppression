@@ -93,7 +93,9 @@ def ou_cholesky(lam: float, sigma: float, dt: float) -> tuple[float, float, floa
     return a, b, c
 
 
-def integrated_ou_increment_var(tau_s: Any, *, lam: float, sigma: float) -> Any:
+def integrated_ou_increment_var(
+    tau_s: Any, *, lam: float | np.ndarray | Tensor, sigma: float | Tensor
+) -> Any:
     """``Var[theta(t + tau) - theta(t)]`` of a STATIONARILY initialized
     integrated OU: ``2 sigma^2 [ |tau|/lam - (1 - exp(-lam|tau|))/lam^2 ]``.
 

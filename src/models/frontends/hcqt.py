@@ -68,7 +68,7 @@ class HCQTFrontEnd(SpectralFrontEnd):
         fmin: float = 32.7,
         n_octaves: int = 6,
         over_sample: int = 5,
-        harmonics: list[int] = None,
+        harmonics: list[int] | None = None,
         hop_length: int = 256,
         phase: bool = True,
         use_log: bool = True,
@@ -161,6 +161,7 @@ class HCQTFrontEnd(SpectralFrontEnd):
 
     def _forward_nnaudio(self, audio: Tensor) -> Tensor:
         """GPU path: nnAudio CQT2010v2, entirely on-device."""
+        assert self._nn_hcqt is not None  # built whenever backend == "nnaudio"
         mag, dphase = self._nn_hcqt(audio)  # (B, H, F, T) each
 
         if self.use_phase:

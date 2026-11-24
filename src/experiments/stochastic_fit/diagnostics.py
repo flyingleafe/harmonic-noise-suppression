@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 
+from .data import Clip
 from .fit import LOO_OFFSETS, loo_reference
 
 ORDER_BANDS: tuple[tuple[int, int], ...] = ((1, 8), (9, 24), (25, 64), (65, 10_000))
@@ -27,16 +28,30 @@ BAND_NAMES = ("k1-8", "k9-24", "k25-64", "k65+")
 CLIP_CACHE = Path.home() / ".cache" / "stochastic_fit_clips"
 
 
-def load_clip_cached(clip_id: str):
-    """The bundle clip, from the local cache or R2."""
-    from .run import BUCKET, PREFIX, clip_from_bytes, r2_client
+def load_clip_cached(clip_id: str) -> Clip:
+    """The bundle clip, from the local cache or R2.
+
+    Bundles use the pre-frames clip format: a JSON ``meta`` (``clip_id``,
+    ``group``, ``sample_rate``) with ``audio``, ``rps`` and ``rps_original``.
+    """
+    from .run import BUCKET, PREFIX, r2_client
 
     CLIP_CACHE.mkdir(parents=True, exist_ok=True)
     local = CLIP_CACHE / f"{clip_id}.npz"
     if not local.exists():
         body = r2_client().get_object(Bucket=BUCKET, Key=f"{PREFIX}/{clip_id}.npz")["Body"].read()
         local.write_bytes(body)
-    return clip_from_bytes(local.read_bytes())
+    with np.load(local, allow_pickle=True) as z:
+        meta = json.loads(str(z["meta"]))
+        return Clip(
+            meta["clip_id"],
+            meta["group"],
+            np.asarray(z["audio"]),
+            np.asarray(z["rps"]),
+            int(meta["sample_rate"]),
+            np.asarray(z["rps_original"]),
+            meta,
+        )
 
 
 @dataclass

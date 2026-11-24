@@ -11,11 +11,13 @@ One unit = one (regime, seed, method) clip. Methods:
 a Gaussian process), which is a different task and is expected to score
 differently — see docs/experiments/comb-slot-crf.md.
 """
+
 from __future__ import annotations
 
 import argparse
 import itertools
 import json
+
 import numpy as np
 
 from utils.gridrun import Unit, add_gridrun_args, gridrun_from_args
@@ -27,11 +29,13 @@ def pit_rmse(pred: np.ndarray, gt: np.ndarray) -> float:
     for p in itertools.permutations(range(pred.shape[0])):
         e = float(np.sqrt(((pred[list(p)] - gt) ** 2).mean()))
         best = e if best is None else min(best, e)
+    assert best is not None  # permutations() always yields at least one ordering
     return best
 
 
 def worker(unit: Unit) -> dict:
     import torch
+
     torch.set_num_threads(int(unit.params.get("threads", 2)))
     from models.comb_salience import CombSalienceNet, decode_peel_viterbi
     from models.comb_slots import SlotCombNet
@@ -39,13 +43,20 @@ def worker(unit: Unit) -> dict:
     p = unit.params
     if p["family"] == "static":
         from data_processing.comb_bench import comb_clip
-        a, rps, _ = comb_clip(seed=p["seed"], centre=p["centre"],
-                              spread=p["spread"], excursion=p["excursion"])
+
+        a, rps, _ = comb_clip(
+            seed=p["seed"], centre=p["centre"], spread=p["spread"], excursion=p["excursion"]
+        )
     else:
         from data_processing.comb_bench_stochastic import stoch_comb_clip
-        a, rps, _ = stoch_comb_clip(seed=p["seed"], centre=p["centre"],
-                                    spread=p["spread"], excursion=p["excursion"],
-                                    **p.get("stoch_kw", {}))
+
+        a, rps, _ = stoch_comb_clip(
+            seed=p["seed"],
+            centre=p["centre"],
+            spread=p["spread"],
+            excursion=p["excursion"],
+            **p.get("stoch_kw", {}),
+        )
     au = torch.tensor(a, dtype=torch.float32)[None]
 
     ckpt = p.get("ckpt")
@@ -56,23 +67,41 @@ def worker(unit: Unit) -> dict:
         # PIT-RMSE from this benchmark. This path measures them here instead.
         import numpy as _np
         import tdseries as td
+
         import zoo
         from data_processing.frames import make_recording_frame
+
         sr = 16000
         t_audio = _np.arange(len(a)) / sr
-        rps_full = _np.stack([_np.interp(t_audio, _np.arange(rps.shape[1]) * 512 / sr, r)
-                              for r in rps])
+        rps_full = _np.stack(
+            [_np.interp(t_audio, _np.arange(rps.shape[1]) * 512 / sr, r) for r in rps]
+        )
         fr = make_recording_frame(
-            {"mixture": td.uniform(_np.ascontiguousarray(a[None].astype(_np.float32)), sr,
-                                   dims=("mic", "time"), t_start=0.0),
-             "rps": td.events(t_audio, _np.ascontiguousarray(rps_full.astype(_np.float32)),
-                              dims=("rotor", "time"), t_start=0.0)},
-            meta={"recording_id": "bench"})
+            {
+                "mixture": td.uniform(
+                    _np.ascontiguousarray(a[None].astype(_np.float32)),
+                    sr,
+                    dims=("mic", "time"),
+                    t_start=0.0,
+                ),
+                "rps": td.events(
+                    t_audio,
+                    _np.ascontiguousarray(rps_full.astype(_np.float32)),
+                    dims=("rotor", "time"),
+                    t_start=0.0,
+                ),
+            },
+            meta={"recording_id": "bench"},
+        )
         fm = zoo.load(p["zoo_exp"], ckpt="best", device="cpu")
         pred = _np.asarray(fm(fr)["rps_pred"].data)
         gt = rps[:, : pred.shape[-1]]
-        return {"regime": p["regime"], "seed": p["seed"], "method": p["tag"],
-                "rmse": pit_rmse(pred, gt)}
+        return {
+            "regime": p["regime"],
+            "seed": p["seed"],
+            "method": p["tag"],
+            "rmse": pit_rmse(pred, gt),
+        }
     if p["method"] == "peel":
         net = CombSalienceNet(head_mode=p.get("head", "classical"))
         if ckpt:
@@ -80,9 +109,13 @@ def worker(unit: Unit) -> dict:
         with torch.no_grad():
             out = decode_peel_viterbi(net, au, octave_mode=p.get("octave", "scored"))
     else:
-        net = SlotCombNet(head_mode=p.get("head", "classical"), n_iter=p["iters"],
-                          union_mode=p.get("union", "noisyor"),
-                          read_width=int(p.get("read_width", 0)), use_checkpoint=False)
+        net = SlotCombNet(
+            head_mode=p.get("head", "classical"),
+            n_iter=p["iters"],
+            union_mode=p.get("union", "noisyor"),
+            read_width=int(p.get("read_width", 0)),
+            use_checkpoint=False,
+        )
         if ckpt:
             net.head.load_state_dict(torch.load(ckpt, map_location="cpu"))
         net.eval()
@@ -90,32 +123,47 @@ def worker(unit: Unit) -> dict:
             out = net.decode(au, subgrid=p.get("subgrid", True))
     pred = out[0].numpy()
     gt = rps[:, : pred.shape[-1]]
-    return {"regime": p["regime"], "seed": p["seed"], "method": p["tag"],
-            "rmse": pit_rmse(pred, gt)}
+    return {
+        "regime": p["regime"],
+        "seed": p["seed"],
+        "method": p["tag"],
+        "rmse": pit_rmse(pred, gt),
+    }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--family", default="static", choices=("static", "stochastic"))
-    ap.add_argument("--methods", default="peel,slots0,slots2",
-                    help="comma list; slotsN = SlotCombNet with N joint sweeps")
+    ap.add_argument(
+        "--methods",
+        default="peel,slots0,slots2",
+        help="comma list; slotsN = SlotCombNet with N joint sweeps",
+    )
     ap.add_argument("--clips", type=int, default=8)
     ap.add_argument("--regimes", default="", help="comma list; default all")
     ap.add_argument("--head", default="classical")
     ap.add_argument("--ckpt", default="")
     ap.add_argument("--threads", type=int, default=2)
-    ap.add_argument("--line-mode", default="stochastic",
-                    choices=("stochastic", "coherent"),
-                    help="stochastic family only: Rayleigh realization or coherent tones")
+    ap.add_argument(
+        "--line-mode",
+        default="stochastic",
+        choices=("stochastic", "coherent"),
+        help="stochastic family only: Rayleigh realization or coherent tones",
+    )
     ap.add_argument("--gamma", default="", help="stochastic only: 'g0lo,g0hi,slo,shi' in Hz")
     ap.add_argument("--union", default="noisyor", choices=("sum", "max", "noisyor"))
-    ap.add_argument("--read-width", type=int, default=0,
-                    help="bins each harmonic is summed over (0 = one interpolated bin)")
+    ap.add_argument(
+        "--read-width",
+        type=int,
+        default=0,
+        help="bins each harmonic is summed over (0 = one interpolated bin)",
+    )
     ap.add_argument("--out", default="results/comb_slots")
     add_gridrun_args(ap, jobs=6)
     args = ap.parse_args()
 
     from data_processing.comb_bench import REGIMES
+
     keep = set(args.regimes.split(",")) if args.regimes else None
     stoch_kw = {"line_mode": args.line_mode}
     if args.gamma:
@@ -127,19 +175,35 @@ def main() -> int:
             continue
         for seed in range(args.clips):
             for m in args.methods.split(","):
-                units.append(Unit(
-                    uid=f"{args.family}__{name}__{m}__{seed}",
-                    params={"family": args.family, "regime": name, "centre": centre,
-                            "spread": spread, "excursion": exc, "seed": 1000 + seed,
+                units.append(
+                    Unit(
+                        uid=f"{args.family}__{name}__{m}__{seed}",
+                        params={
+                            "family": args.family,
+                            "regime": name,
+                            "centre": centre,
+                            "spread": spread,
+                            "excursion": exc,
+                            "seed": 1000 + seed,
                             "tag": m,
-                            "method": ("peel" if m == "peel"
-                                       else "zoo" if m.startswith("zoo:") else "slots"),
+                            "method": (
+                                "peel"
+                                if m == "peel"
+                                else "zoo"
+                                if m.startswith("zoo:")
+                                else "slots"
+                            ),
                             "zoo_exp": m[4:] if m.startswith("zoo:") else "",
                             "iters": 0 if not m.startswith("slots") else int(m[5:]),
-                            "head": args.head, "ckpt": args.ckpt,
-                            "threads": args.threads, "stoch_kw": stoch_kw,
+                            "head": args.head,
+                            "ckpt": args.ckpt,
+                            "threads": args.threads,
+                            "stoch_kw": stoch_kw,
                             "union": args.union,
-                            "read_width": args.read_width}))
+                            "read_width": args.read_width,
+                        },
+                    )
+                )
     res = gridrun_from_args(args, units, worker, args.out, mp_context="spawn")
     rows = [json.loads(p.read_text()) for p in sorted((res.out_dir / "raw").glob("*.json"))]
     tags = [m for m in args.methods.split(",")]
@@ -151,9 +215,13 @@ def main() -> int:
             v = [r["rmse"] for r in rows if r["regime"] == n and r["method"] == t]
             cells.append(f"{np.mean(v):12.3f}" if v else f"{'-':>12}")
         print(f"{n:<14}" + "".join(cells))
-    print(f"{'GEOMEAN':<14}" + "".join(
-        f"{np.exp(np.mean(np.log([np.mean([r['rmse'] for r in rows if r['regime']==n and r['method']==t]) for n in names]))):12.3f}"
-        for t in tags))
+    print(
+        f"{'GEOMEAN':<14}"
+        + "".join(
+            f"{np.exp(np.mean(np.log(np.asarray([np.mean([r['rmse'] for r in rows if r['regime'] == n and r['method'] == t]) for n in names])))):12.3f}"
+            for t in tags
+        )
+    )
     return res.exit_code
 
 

@@ -24,15 +24,18 @@ Output:
     (T, 360, 5), transpose to (2, 1, 0).
 """
 
+from typing import Any
+
 import librosa
 import numpy as np
+import numpy.typing as npt
 from librosa import amplitude_to_db, cqt, magphase
 from librosa.util import fix_length
 
 # ── Default parameters (exactly as in the paper) ───────────────────────────
 
 
-def hcqt_params():
+def hcqt_params() -> dict[str, Any]:
     """Return the HCQT parameters used in the paper."""
     return dict(
         sr=22050,
@@ -100,10 +103,10 @@ def compute_hcqt(
     fmin: float = 32.7,
     n_octaves: int = 6,
     over_sample: int = 5,
-    harmonics: list[int] = None,
+    harmonics: list[int] | None = None,
     hop_length: int = 256,
     log: bool = True,
-    dtype: np.dtype = np.float32,
+    dtype: npt.DTypeLike = np.float32,
 ) -> dict[str, np.ndarray]:
     """Compute HCQT magnitude and raw phase.
 
@@ -136,10 +139,7 @@ def compute_hcqt(
         'phase' : np.ndarray, shape (n_harmonics, n_bins, n_frames)
                   Raw phase in radians.
     """
-    if harmonics is None:
-        harmonics = [1, 2, 3, 4, 5]
-    else:
-        harmonics = list(harmonics)
+    harmonics = [1, 2, 3, 4, 5] if harmonics is None else list(harmonics)
 
     bins_per_octave = 12 * over_sample
     n_bins = n_octaves * bins_per_octave
@@ -159,7 +159,7 @@ def compute_hcqt(
             n_bins=n_bins,
             bins_per_octave=bins_per_octave,
         )
-        C = fix_length(C, size=n_frames)
+        C = fix_length(C, size=int(n_frames))
         C_mag, C_phase = magphase(C)
 
         if log:

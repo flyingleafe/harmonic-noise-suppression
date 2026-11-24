@@ -363,6 +363,9 @@ def test_one_cluster_yields_no_interval_at_all() -> None:
 
 def test_the_reported_bounds_are_the_conservative_ones() -> None:
     ci = RE.cluster_interval([0.1, 0.2, 0.3, 0.4, 0.5], alpha=0.05, n_boot=2000, seed=1)
+    assert ci.t_lower is not None and ci.boot_lower is not None
+    assert ci.t_upper is not None and ci.boot_upper is not None
+    assert ci.lower is not None and ci.mean is not None and ci.upper is not None
     assert ci.lower == min(ci.t_lower, ci.boot_lower)
     assert ci.upper == max(ci.t_upper, ci.boot_upper)
     assert ci.lower < ci.mean < ci.upper
@@ -782,7 +785,9 @@ def _revised_export(path: Path, *, clips: list[dict[str, Any]], digest: str = "a
                 lambda_source="fixed_reference",
                 shared_phase_evidence="not_identified_by_marginal_score",
                 rig_id="michaels",
-                parameters=dict(lam=6.0, sigma=1.0, d_scalar=1.0, profile_db=[[0.0, -3.0], [0.0, -3.0]]),
+                parameters=dict(
+                    lam=6.0, sigma=1.0, d_scalar=1.0, profile_db=[[0.0, -3.0], [0.0, -3.0]]
+                ),
                 training_provenance=dict(manifest_sha256=digest, clips=clips),
                 diagnostics=_c2_diagnostics(),
             )
@@ -859,7 +864,11 @@ def test_revised_export_must_declare_valid_c2_contract(tmp_path: Path) -> None:
         ("lambda_source", "estimated", "lambda_source='fixed_reference'"),
         ("shared_phase_evidence", "identified", "must not claim causal sharing"),
     ):
-        data = json.loads(_revised_export(p, clips=[dict(recording="FLY125", start_s=16.0, seconds=16.0, regime="cruise")]).read_text())
+        data = json.loads(
+            _revised_export(
+                p, clips=[dict(recording="FLY125", start_s=16.0, seconds=16.0, regime="cruise")]
+            ).read_text()
+        )
         data[field] = value
         p.write_text(json.dumps(data))
         with pytest.raises(ValueError, match=pattern):
@@ -914,8 +923,18 @@ def test_fixed_carrier_marginal_export_contract_names_conditioning_track(tmp_pat
             "eval_count": 2,
             "termination": "lbfgs_completed",
             "closure_trace": [
-                {"eval": 1, "kind": "initial_full_objective", "full_objective": 10.0, "grad_norm": 0.0},
-                {"eval": 2, "kind": "final_full_objective", "full_objective": 9.0, "grad_norm": 0.5},
+                {
+                    "eval": 1,
+                    "kind": "initial_full_objective",
+                    "full_objective": 10.0,
+                    "grad_norm": 0.0,
+                },
+                {
+                    "eval": 2,
+                    "kind": "final_full_objective",
+                    "full_objective": 9.0,
+                    "grad_norm": 0.5,
+                },
             ],
         }
     }
@@ -926,7 +945,13 @@ def test_fixed_carrier_marginal_export_contract_names_conditioning_track(tmp_pat
     assert cand.provenance()["carrier_source"] == "refined"
 
     runner = _runner()
-    model = runner.arm_model("cand", {"kind": "revised_export", "export": str(p)}, regime="cruise", recording="x", rig="dregon")
+    model = runner.arm_model(
+        "cand",
+        {"kind": "revised_export", "export": str(p)},
+        regime="cruise",
+        recording="x",
+        rig="dregon",
+    )
     assert model.conditioning_rps_key("motors_command") == RE.REFINED_RPS_KEY
 
     data["diagnostics"]["map_state"] = {"free-flight_nosource_room2": {}}
@@ -958,7 +983,10 @@ def test_fixed_carrier_marginal_export_contract_names_conditioning_track(tmp_pat
     with pytest.raises(ValueError, match="Michael's fixed-carrier export"):
         RE.read_candidate_export(p)
 
-def test_refined_candidate_conditioning_keeps_raw_scoring_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_refined_candidate_conditioning_keeps_raw_scoring_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from experiments.stochastic_fit.data import Clip
 
     runner = _runner()
@@ -1295,7 +1323,14 @@ def _base_manifest(tmp_path: Path) -> dict[str, Any]:
         "status": "PROPOSED",
         "notes": ["a note"],
         "scorer": {"experiment": "hppnet_l2_r2_s0", "ckpt": "best"},
-        "observation": {"sr": 16000, "n_fft": 16384, "hop": 1024, "f_min": 30.0, "f_max": 7900.0, "training_guard_seconds": 1.024},
+        "observation": {
+            "sr": 16000,
+            "n_fft": 16384,
+            "hop": 1024,
+            "f_min": 30.0,
+            "f_max": 7900.0,
+            "training_guard_seconds": 1.024,
+        },
         "gates": {
             "alpha": 0.05,
             "bootstrap_seed": 0,
@@ -1303,7 +1338,10 @@ def _base_manifest(tmp_path: Path) -> dict[str, Any]:
             "michaels_ratio_max": 1.05,
             "composite_tolerance": 0.0,
         },
-        "null_variation": {"seeds": [2001, 2002, 2003, 2004], "metrics": ["pit_mae", "ltas_abs_db"]},
+        "null_variation": {
+            "seeds": [2001, 2002, 2003, 2004],
+            "metrics": ["pit_mae", "ltas_abs_db"],
+        },
         "cohorts": [],
         "arms": {"real": {"kind": "real"}, "baseline": {"kind": "export_render"}},
         "candidate_arm_template": {"kind": "revised_export"},
@@ -1352,10 +1390,16 @@ def test_protocol_fingerprint_adopts_old_calibration_manifest(tmp_path: Path) ->
     # Simulate an old calibration record with no protocol_sha256.
     cal = {
         "manifest": {"path": str(path), "sha256": man["_digest"]},
-        "frozen_inputs": {"manifest": {"path": str(path), "sha256": man["_digest"]}, "scorer": {"sha256": "same"}, "exports": {}, "datasets": {}},
+        "frozen_inputs": {
+            "manifest": {"path": str(path), "sha256": man["_digest"]},
+            "scorer": {"sha256": "same"},
+            "exports": {},
+            "datasets": {},
+        },
     }
     sha = runner.verify_protocol_fingerprint(man, cal)
     assert sha == runner.protocol_fingerprint(man)
+
 
 def test_fixed_carrier_eval_manifests_keep_the_frozen_v2_protocol_fingerprint() -> None:
     runner = _runner()
@@ -1433,7 +1477,9 @@ def test_per_rig_candidate_leakage_guard_pins_fit_manifest(tmp_path: Path) -> No
         },
     }
     scored = [RE.Window("free-flight_nosource_room2", 0.0, 8.0, regime="cruise")]
-    report = runner.candidate_leakage_guard(spec, scored, cohort_name="dregon_room2_cruise", rig="dregon")
+    report = runner.candidate_leakage_guard(
+        spec, scored, cohort_name="dregon_room2_cruise", rig="dregon"
+    )
     assert report["clean"]
     spec_override = {
         "kind": "revised_export",
@@ -1458,4 +1504,6 @@ def test_per_rig_candidate_leakage_guard_pins_fit_manifest(tmp_path: Path) -> No
         },
     }
     with pytest.raises(SystemExit, match="rig_id"):
-        runner.candidate_leakage_guard(spec_mismatch, scored, cohort_name="michaels_fly124", rig="michaels")
+        runner.candidate_leakage_guard(
+            spec_mismatch, scored, cohort_name="michaels_fly124", rig="michaels"
+        )

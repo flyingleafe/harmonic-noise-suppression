@@ -50,6 +50,10 @@ from typing import Any, NoReturn
 
 import numpy as np
 
+from data_processing.noise_model.constants import AMP_RPS_REF, SPEED_FLOOR_RPS
+from data_processing.noise_model.floor import floor_geometry, floor_power_spectrum
+from data_processing.noise_model.ou import simulate_state
+from data_processing.noise_model.resample import antialias
 from experiments.noise_model import gates as GT
 from experiments.noise_model import model as MD
 from experiments.noise_model import render as RD
@@ -151,7 +155,7 @@ def render_phase(
     dt = 1.0 / float(sr_work)
     t_src = np.arange(n_out) / float(sr)
     t_work = np.arange(n_work) / float(sr_work)
-    f0 = np.maximum(np.stack([np.interp(t_work, t_src, r) for r in rps]), RD.SPEED_FLOOR_RPS)
+    f0 = np.maximum(np.stack([np.interp(t_work, t_src, r) for r in rps]), SPEED_FLOOR_RPS)
     k_max = min(
         int(profile_db.shape[1]),
         SP.k_max_for_carrier(f0.max(axis=1), sr, k_cap=int(profile_db.shape[1])),
@@ -161,7 +165,7 @@ def render_phase(
     lam = float(p["lam"])
     sigma_nu = float(p["sigma_nu"])
     innov = rng_state.standard_normal((n_rotors, n_work, 2))
-    theta, _nu = RD.simulate_state(innov, lam=lam, sigma=sigma_nu, dt=dt)
+    theta, _nu = simulate_state(innov, lam=lam, sigma=sigma_nu, dt=dt)
     phase = 2.0 * np.pi * np.cumsum(f0, axis=1) * dt + theta
 
     mic_line_db = np.asarray(p["profile"]["mic_line_gain_db"], dtype=np.float64)
@@ -172,7 +176,7 @@ def render_phase(
     all_gain = 10.0 ** ((gain_all_db[:n_mics] - gain_all_db[:n_mics].mean()) / 10.0)
 
     amp_exp = float(p["profile"]["amp_exp"])
-    speed = f0 / RD.AMP_RPS_REF
+    speed = f0 / AMP_RPS_REF
     audio = np.zeros((n_mics, n_work), dtype=np.float64)
     rng_inc = np.random.default_rng(int(seed) + 991)
     for r in range(n_rotors):
@@ -226,9 +230,9 @@ def render_phase(
                     audio[m] += (g * math.cos(alpha[m])) * ic
                     audio[m] -= (g * math.sin(alpha[m])) * is_
 
-    shape_mat, tilt_oct = RD.floor_geometry(np.fft.rfftfreq(n_work, d=dt), SP.floor_ctrl_hz(sr))
+    shape_mat, tilt_oct = floor_geometry(np.fft.rfftfreq(n_work, d=dt), SP.floor_ctrl_hz(sr))
     shape_db = SP.floor_shape_db(p["floor"]["floor_shape_z"], sr=sr)
-    floor_psd = RD.floor_power_spectrum(
+    floor_psd = floor_power_spectrum(
         shape_mat,
         tilt_oct,
         mean_db=float(p["floor"]["floor_mean_db"]),
@@ -246,7 +250,7 @@ def render_phase(
         audio[m] += shaped * np.sqrt(floor_gain_t) * math.sqrt(10.0 ** (mic_floor_db[m] / 10.0))
     audio *= np.sqrt(all_gain)[:, None]
     out = C.decimate(
-        Clip("noise_v2_render", "synthetic", RD.antialias(audio, sr_work), f0, int(sr_work)),
+        Clip("noise_v2_render", "synthetic", antialias(audio, sr_work), f0, int(sr_work)),
         int(sr),
     )
     return np.asarray(out.audio, dtype=np.float64)[:, :n_out]

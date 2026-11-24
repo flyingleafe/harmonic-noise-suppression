@@ -265,6 +265,112 @@ def _examples(args: argparse.Namespace) -> int:
     return 0
 
 
+def _multiscale(args: argparse.Namespace) -> int:
+    from experiments.rps_traj import multiscale as ms
+
+    rc._threads(1)
+    out = Path(args.out)
+    rows = ms.evaluate(models=False, out_dir=out)
+    gate = ms.gate(rows)
+    passed = all(v["passed"] for v in gate.values())
+    result = {"passed": passed, "gate": gate, "control_flights": rows}
+    if passed:
+        result["model_flights"] = ms.evaluate(models=True, out_dir=out)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "multiscale.json"
+    path.write_text(json.dumps(result, indent=1, sort_keys=True, allow_nan=False) + "\n")
+    print(path, {k: v["passed"] for k, v in gate.items()})
+    return 0
+
+
+def _spectral(args: argparse.Namespace) -> int:
+    from experiments.rps_traj.spectral_validation import run
+
+    rc._threads(1)
+    report = run(Path(args.out))
+    print(
+        "Spectral-component gates:",
+        {k: v["passed"] for k, v in report["spectral_controls"].items()},
+    )
+    print(Path(args.out) / "spectral_validation.json")
+    return _flight_inspector(args)
+
+
+def _schedule(args: argparse.Namespace) -> int:
+    """Fixed-schedule controls on every measured target, then the five arms."""
+    from experiments.rps_traj import schedule_eval as se
+
+    rc._threads(1)
+    for path in se.run(Path(args.out), controls_only=args.controls_only):
+        print(path)
+    return 0
+
+
+def _flight_inspector(args: argparse.Namespace) -> int:
+    """Attach recorded telemetry to the exported flight MDS map, without refitting it."""
+    from base64 import b64encode
+    from collections import defaultdict
+    from importlib.resources import files
+
+    import numpy as np
+
+    from experiments.rps_traj.phases import load_flights
+    from experiments.rps_traj.spectral_inputs import dataset_pins, recording_id
+    from plots.timeframe.renderers import ROTOR_COLORS
+
+    out = Path(args.out)
+    path = out / "flight_mds.html"
+    page = path.read_text()
+    report = json.loads((out / "spectral_validation.json").read_text())
+    if dataset_pins() != report["inventory"]["dataset_pins"]:
+        raise ValueError("dataset pins no longer match the flight map")
+    starts = defaultdict(list)
+    flights = {}
+    for row in report["segments"]:
+        starts[row["rig"], row["segment"]].append(row["start_s"])
+        flights.setdefault(row["rig"], {}).setdefault(row["flight"], [])
+    for rig, records in flights.items():
+        for f in load_flights(rig):
+            rec = recording_id(rig, f.flight)
+            if rec not in records:
+                continue
+            records[rec].append(
+                {
+                    "id": f.flight,
+                    "source": f.source,
+                    "hz": f.fs,
+                    "starts": starts.pop((rig, f.flight), []),
+                    "data": b64encode(np.asarray(f.rps, dtype="<f4", order="C")).decode("ascii"),
+                }
+            )
+    if starts or any(not parts for records in flights.values() for parts in records.values()):
+        raise ValueError("unmatched cruise windows or missing flight telemetry")
+    payload = {
+        "flights": flights,
+        "colors": ROTOR_COLORS,
+        "window_s": report["samples"] / report["sample_rate_hz"],
+    }
+    ui = files("plots").joinpath("flight_inspector.html").read_text()
+    ui = ui.replace(
+        "__TELEMETRY__", json.dumps(payload, separators=(",", ":")).replace("<", r"\u003c")
+    )
+    # An existing Plotly export is the input. Replace only our own fragment on rebuild.
+    start, end = "<!-- flight-inspector:start -->", "<!-- flight-inspector:end -->"
+    if start in page:
+        before, old = page.split(start, 1)
+        _, after = old.split(end, 1)
+    else:
+        before, tag, tail = page.rpartition("</body>")
+        if not tag or 'id="flight-map"' not in before:
+            raise ValueError(f"{path} is not the exported flight map")
+        after = tag + tail
+    with path.with_suffix(".html.tmp").open("w") as stream:
+        stream.writelines((before, start, ui, end, after))
+    path.with_suffix(".html.tmp").replace(path)
+    print(f"{path}: {sum(map(len, flights.values()))} selectable flights")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -289,7 +395,24 @@ def main() -> int:
     examples.add_argument("--fold", default="0")
     examples.add_argument("--draws", type=int, default=3)
     examples.set_defaults(func=_examples)
-    for p in (run, table, bench, examples):
+    multiscale = sub.add_parser("multiscale", help="validate path score before comparing models")
+    multiscale.set_defaults(func=_multiscale)
+    spectral = sub.add_parser(
+        "spectral", help="validate mean speed + cross-spectrum and map all flights"
+    )
+    spectral.set_defaults(func=_spectral)
+    inspector = sub.add_parser(
+        "flight-inspector", help="attach clickable rotor traces to flight_mds.html"
+    )
+    inspector.set_defaults(func=_flight_inspector)
+    schedule = sub.add_parser(
+        "schedule", help="fixed-schedule controls, then model arms, per flight"
+    )
+    schedule.add_argument(
+        "--controls-only", action="store_true", help="stop after the real-data controls"
+    )
+    schedule.set_defaults(func=_schedule)
+    for p in (run, table, bench, examples, multiscale, spectral, inspector, schedule):
         p.add_argument("--out", default=DEFAULT_OUT)
     args = ap.parse_args()
     return int(args.func(args))

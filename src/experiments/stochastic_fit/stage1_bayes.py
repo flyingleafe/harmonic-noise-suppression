@@ -280,7 +280,7 @@ def reconstruct(
     rig_params.load_state_dict(state)
     for p in rig_params.parameters():
         p.requires_grad_(False)
-    rcs = rig._prepare([staged[0][2]], rig_params, device)
+    rcs = rig._prepare([staged[0]], rig_params, device)
     with torch.no_grad():
         for rc in rcs:
             rc.model.level_db.copy_(

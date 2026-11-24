@@ -768,6 +768,11 @@ def initialiser_block(batch: MD.SupportBatch, sigma_rev: float) -> dict[str, Any
 
 # ── patch 1, run offline ────────────────────────────────────────────────────
 
+#: The wide-band residual test of bench rule rev 1, which this patch copies.
+#: ``supports`` dropped both constants in rule rev 2 (950d2376); values as there.
+BENCH_WIDE_BAND_FRAC = 0.45
+BENCH_WIDE_TOL_HZ = 3.0
+
 
 def patched_stationary_segment(
     audio: np.ndarray, sr: float, survey_rev_s: list[float], *, level_tol_db: float = 6.0
@@ -795,7 +800,7 @@ def patched_stationary_segment(
         f0 = SU.refine_carrier(x[0], sr, float(f_survey), k)
         carrier = np.full(n, f0)
         res = []
-        for band in (SU.BENCH_DEMOD_BAND_HZ, SU.BENCH_WIDE_BAND_FRAC * f0):
+        for band in (SU.BENCH_DEMOD_BAND_HZ, BENCH_WIDE_BAND_FRAC * f0):
             z = demodulate(x, carrier, float(band), sr, order=k)
             mm = np.mean(residual_frequency(z, sr, smooth_s=0.0), axis=0)
             res.append(SU._moving_mean(mm, smooth)[inner])
@@ -809,7 +814,7 @@ def patched_stationary_segment(
     level = SU._moving_mean(np.mean(x**2, axis=0), smooth)[inner]
     level_db = 10.0 * np.log10(np.maximum(level, 1e-30))
     motor_on = level_db >= level_db.max() - float(level_tol_db)
-    inside = (worst <= SU.BENCH_RESIDUAL_TOL_HZ) & (worst_wide <= SU.BENCH_WIDE_TOL_HZ) & motor_on
+    inside = (worst <= SU.BENCH_RESIDUAL_TOL_HZ) & (worst_wide <= BENCH_WIDE_TOL_HZ) & motor_on
     a, b = SU._longest_run(inside)
     longest = (b - a) / sr
     if longest < SU.BENCH_MIN_SEGMENT_S:
@@ -1069,16 +1074,16 @@ def cmd_objective(args: argparse.Namespace) -> None:
             for f0 in scan_f
         ]
         # (d) THE PIPELINE MAIN PROPOSES: no in-fit refinement at all. The batch
-        # geometry comes from the index carrier (``refine_carrier=False``, so
-        # ``k_max`` and the order groups are the index carrier's), the comb is
-        # read off the data at that carrier, and everything else is as fitted.
+        # geometry comes from the index carrier (``refine_carrier=False``, which
+        # is all ``bench_batch`` does since 950d2376 removed the flag, so ``k_max``
+        # and the order groups are the index carrier's), the comb is read off the
+        # data at that carrier, and everything else is as fitted.
         d_batch = MD.bench_batch(
             name=support.name + "__no_refine",
             power=np.asarray(support.power, dtype=np.float64),
             sr=int(support.sr),
             carrier_mean=np.asarray(support.carrier_rev_s, dtype=np.float64).mean(axis=1),
             k_cap=130,
-            refine_carrier=False,
         )
         d_arm = oracle_comb(d_batch, par, carriers["index"], sigma_rev)
         d_arm["batch_k_max"] = int(d_batch.k_max)

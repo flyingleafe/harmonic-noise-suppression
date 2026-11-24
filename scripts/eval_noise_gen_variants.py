@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
+import tdseries as td
 import torch
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +37,8 @@ sys.path.insert(0, str(_ROOT / "src"))
 from hydra import compose, initialize_config_dir  # noqa: E402
 from hydra.core.global_hydra import GlobalHydra  # noqa: E402
 
+from data_processing.collate import batch_size as frame_batch_size  # noqa: E402
+from data_processing.collate import slice_sample  # noqa: E402
 from losses.spectral_likelihood import SpectralLikelihood  # noqa: E402
 from tasks.codecs import build_codec  # noqa: E402
 from training.config import (  # noqa: E402  # noqa: E402
@@ -50,11 +54,17 @@ from training.config import (  # noqa: E402  # noqa: E402
 register_configs()  # put RootConfig/base_config into Hydra's ConfigStore
 from training.loop import (  # noqa: E402
     _forward,
-    _iter_samples,
     _make_loader,
     _to_device,
     _warm_start,
 )
+
+
+def _iter_samples(frame: td.Frame) -> Iterator[td.Frame]:
+    # training.loop._iter_samples was removed in 3d8ee067 (the loop now inlines it).
+    for i in range(frame_batch_size(frame)):
+        yield slice_sample(frame, i)
+
 
 VARIANTS: dict[str, tuple[str, str]] = {
     "old_wronggeom": (
@@ -228,7 +238,7 @@ def eval_variant(
     # beta=0: a proper scoring rule must be the unweighted likelihood.
     nll_core = SpectralLikelihood(n_ffts=(2048, 512), beta=0.0).to(device)
     model = instantiate_model(cfg.model).to(device)
-    _warm_start(model, str(cfg.checkpoint), device)
+    _warm_start(model, str(cfg.checkpoint), device, artifacts_cfg=cfg.artifacts)
     metric_suite = build_metrics(cfg.metrics)
     valid_loader = _make_loader(
         build_dataset(cfg.data.valid), batch_size=batch_size, num_workers=0, shuffle=False

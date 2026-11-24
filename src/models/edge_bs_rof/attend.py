@@ -141,6 +141,8 @@ class Attend(nn.Module):
             q = q * (self.scale / default_scale)  # Adjust q by custom scale ratio
 
         config = self.cuda_config if is_cuda else self.cpu_config
+        # flash=True with CUDA available always sets cuda_config in __init__
+        assert config is not None
 
         # Flash Attention requires float16 or bfloat16 - fall back to MATH for float32
         is_half_precision = q.dtype in (torch.float16, torch.bfloat16)

@@ -511,7 +511,9 @@ def intermittency(lines: Sequence[dict[str, Any]]) -> dict[str, float]:
         frac_under_present=float(np.mean(presp < UNDER_FLOOR_DB)) if presp.size else NAN,
         frac_intermittent=float(np.mean(inter)),
         block_sd_present_db=(
-            float(np.median([np.std(ln["prom"], ddof=1) for ln in pres])) if pres else NAN
+            float(np.median(np.asarray([np.std(ln["prom"], ddof=1) for ln in pres])))
+            if pres
+            else NAN
         ),
         frac_dropout_visible=float(np.mean(visp < PRESENT_DB)) if visp.size else NAN,
         prom_median_db=float(np.median(allp)),

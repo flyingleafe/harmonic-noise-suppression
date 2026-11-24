@@ -272,7 +272,9 @@ def test_the_in_band_loss_is_the_decimator_not_the_antialias() -> None:
     sr_work, sr_out = 64000, 16000
     aa = antialias_filter(float(sr_work))
     w = 2.0 * np.pi * 7900.0 / sr_work
-    aa_db = 20.0 * np.log10(abs(freqz(aa.taps, worN=[w])[1][0]))
+    # scipy's freqz is unannotated: pyright infers ``worN: int`` from its default,
+    # but a list of angular frequencies is a documented worN
+    aa_db = 20.0 * np.log10(abs(freqz(aa.taps, worN=[w])[1][0]))  # pyright: ignore[reportArgumentType]
     total_db = 10.0 * np.log10(
         render_transfer_power(np.array([7900.0]), sample_rate_work=sr_work, sample_rate_out=sr_out)[
             0

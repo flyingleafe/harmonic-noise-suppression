@@ -224,7 +224,8 @@ class Transformer(Module):
         self.norm = RMSNorm(dim) if norm_output else nn.Identity()
 
     def forward(self, x):
-        for attn, ff in self.layers:
+        for layer in self.layers:
+            attn, ff = cast(ModuleList, layer)
             x = attn(x) + x
             x = ff(x) + x
 
@@ -336,6 +337,9 @@ class MelBandRoformer(Module):
     - Uses rotary positional encoding
     - Supports multi-resolution STFT loss
     """
+
+    freq_indices: Tensor
+    num_bands_per_freq: Tensor
 
     @beartype
     def __init__(
@@ -557,7 +561,7 @@ class MelBandRoformer(Module):
 
         # Index frequencies for all bands
         batch_arange = torch.arange(batch, device=device)[..., None]
-        x = stft_repr[batch_arange, cast(Tensor, self.freq_indices)]
+        x = stft_repr[batch_arange, self.freq_indices]
 
         # Fold complex (real and imaginary) to frequency dimension
         x = rearrange(x, "b f t c -> b t (f c)")
@@ -570,7 +574,8 @@ class MelBandRoformer(Module):
 
         # Axial/hierarchical attention processing
         store = [None] * len(self.layers)
-        for i, transformer_block in enumerate(self.layers):
+        for i, block in enumerate(self.layers):
+            transformer_block = cast(ModuleList, block)
             if len(transformer_block) == 3:
                 linear_transformer, time_transformer, freq_transformer = transformer_block
 
@@ -581,7 +586,7 @@ class MelBandRoformer(Module):
                     x = linear_transformer(x)
                 (x,) = unpack(x, ft_ps, "b * d")
             else:
-                time_transformer, freq_transformer = cast(ModuleList, transformer_block)
+                time_transformer, freq_transformer = transformer_block
 
             if self.skip_connection:
                 # Accumulate previous features
@@ -617,7 +622,11 @@ class MelBandRoformer(Module):
         num_stems = len(self.mask_estimators)
         if self.use_torch_checkpoint:
             masks = torch.stack(
-                [checkpoint(fn, x, use_reentrant=False) for fn in self.mask_estimators], dim=1
+                [
+                    cast(Tensor, checkpoint(fn, x, use_reentrant=False))
+                    for fn in self.mask_estimators
+                ],
+                dim=1,
             )
         else:
             masks = torch.stack([fn(x) for fn in self.mask_estimators], dim=1)

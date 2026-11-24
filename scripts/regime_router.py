@@ -54,7 +54,9 @@ DEFAULT_ROUTE = {
 }
 
 
-def frame_level_db(audio: np.ndarray, n_frames: int, n_fft: int = 2048, hop: int = 512) -> np.ndarray:
+def frame_level_db(
+    audio: np.ndarray, n_frames: int, n_fft: int = 2048, hop: int = 512
+) -> np.ndarray:
     """Per-frame level in dB, relative to the clip's own 95th percentile.
 
     The regime cue every router so far ignored. Each of them judged the regime
@@ -71,7 +73,6 @@ def frame_level_db(audio: np.ndarray, n_frames: int, n_fft: int = 2048, hop: int
     statistics, which a deployed system also has for its own input, but it is NOT
     a per-frame-causal feature and it is not free of the clip's content.
     """
-    n = audio.size
     frames = []
     for i in range(n_frames):
         start = i * hop
@@ -150,7 +151,7 @@ def infer_regimes(
     about 39 rev/s and would put ramp frames in the cruise bin alone.
     """
     stack = np.stack(list(preds.values()))  # (model, rotor, frame)
-    med = np.median(stack, axis=0)
+    med: np.ndarray = np.median(stack, axis=0)
     judge = preds.get(zero_judge, med)
     labels = np.full(med.shape[1], "low", dtype=object)
     labels[med.mean(axis=0) >= flight_thresh] = "flight"
@@ -175,29 +176,59 @@ def infer_regimes(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--route", nargs="*", default=None,
-                    help="regime=experiment pairs; default is the campaign's per-cell bests")
+    ap.add_argument(
+        "--route",
+        nargs="*",
+        default=None,
+        help="regime=experiment pairs; default is the campaign's per-cell bests",
+    )
     ap.add_argument("--channels", type=int, default=8)
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--zero-judge", default="m3abl_comb_unigru128_s1",
-                    help="the specialist whose prediction decides the zero regime")
-    ap.add_argument("--zero-thresh", type=float, nargs="*", default=[10.0],
-                    help="predicted mean rev/s below which a frame is called zero")
-    ap.add_argument("--flight-thresh", type=float, nargs="*", default=[45.0],
-                    help="predicted mean rev/s at or above which a frame is called cruise. "
-                         "The evaluation's own boundary is 45, but a ramp frame whose speed "
-                         "the specialists overshoot lands in the cruise bin at that value: "
-                         "45% of ramp frames did. Raising it trades cruise purity for ramp "
-                         "recall, and real cruise sits near 70, so there is room.")
-    ap.add_argument("--slope-thresh", type=float, nargs="*", default=[0.0],
-                    help="rev/s per frame of smoothed |d speed/dt| above which a "
-                         "cruise-binned frame is re-called a ramp. 0 disables.")
-    ap.add_argument("--smooth", type=int, nargs="*", default=[0],
-                    help="median-filter width (frames) applied to the predicted track "
-                         "before the slope test, so cruise jitter is not read as a sweep")
-    ap.add_argument("--level-judge", action="store_true",
-                    help="decide the regime from the INPUT's own per-frame level "
-                         "instead of the specialists' predictions")
+    ap.add_argument(
+        "--zero-judge",
+        default="m3abl_comb_unigru128_s1",
+        help="the specialist whose prediction decides the zero regime",
+    )
+    ap.add_argument(
+        "--zero-thresh",
+        type=float,
+        nargs="*",
+        default=[10.0],
+        help="predicted mean rev/s below which a frame is called zero",
+    )
+    ap.add_argument(
+        "--flight-thresh",
+        type=float,
+        nargs="*",
+        default=[45.0],
+        help="predicted mean rev/s at or above which a frame is called cruise. "
+        "The evaluation's own boundary is 45, but a ramp frame whose speed "
+        "the specialists overshoot lands in the cruise bin at that value: "
+        "45% of ramp frames did. Raising it trades cruise purity for ramp "
+        "recall, and real cruise sits near 70, so there is room.",
+    )
+    ap.add_argument(
+        "--slope-thresh",
+        type=float,
+        nargs="*",
+        default=[0.0],
+        help="rev/s per frame of smoothed |d speed/dt| above which a "
+        "cruise-binned frame is re-called a ramp. 0 disables.",
+    )
+    ap.add_argument(
+        "--smooth",
+        type=int,
+        nargs="*",
+        default=[0],
+        help="median-filter width (frames) applied to the predicted track "
+        "before the slope test, so cruise jitter is not read as a sweep",
+    )
+    ap.add_argument(
+        "--level-judge",
+        action="store_true",
+        help="decide the regime from the INPUT's own per-frame level "
+        "instead of the specialists' predictions",
+    )
     ap.add_argument("--level-zero-db", type=float, nargs="*", default=[-18.0])
     ap.add_argument("--level-low-db", type=float, nargs="*", default=[-8.0])
     ap.add_argument("--out", default=None)
@@ -218,7 +249,10 @@ def main() -> int:
     rigs = clip_rigs()
 
     dataset = DregonLMFrameDataset(
-        data_dir=VALID, n_fft=2048, hop_length=512, sample_rate=16000,
+        data_dir=VALID,
+        n_fft=2048,
+        hop_length=512,
+        sample_rate=16000,
         flatten_channels=False,
     )
     n_clips = len(dataset) if args.limit is None else min(len(dataset), args.limit)
@@ -226,8 +260,11 @@ def main() -> int:
     # err[key][rig][regime] -> list of per-frame absolute errors
     if args.level_judge:
         thresholds = [(lz, ll, 0.0, 0) for lz in args.level_zero_db for ll in args.level_low_db]
-        keys = ["oracle", *[f"level@{lz:g}/{ll:g}" for lz, ll, _, _ in thresholds],
-                *[f"single:{n}" for n in names]]
+        keys = [
+            "oracle",
+            *[f"level@{lz:g}/{ll:g}" for lz, ll, _, _ in thresholds],
+            *[f"single:{n}" for n in names],
+        ]
     else:
         thresholds = [
             (z, f, sl, sm)
@@ -236,15 +273,21 @@ def main() -> int:
             for sl in args.slope_thresh
             for sm in args.smooth
         ]
-        keys = ["oracle", *[f"routed@z{z:g}f{f:g}s{sl:g}m{sm:g}" for z, f, sl, sm in thresholds],
-                *[f"single:{n}" for n in names]]
+        keys = [
+            "oracle",
+            *[f"routed@z{z:g}f{f:g}s{sl:g}m{sm:g}" for z, f, sl, sm in thresholds],
+            *[f"single:{n}" for n in names],
+        ]
 
     def label_of(t) -> str:
-        return f"level@{t[0]:g}/{t[1]:g}" if args.level_judge else \
-               f"routed@z{t[0]:g}f{t[1]:g}s{t[2]:g}m{t[3]:g}"
+        return (
+            f"level@{t[0]:g}/{t[1]:g}"
+            if args.level_judge
+            else f"routed@z{t[0]:g}f{t[1]:g}s{t[2]:g}m{t[3]:g}"
+        )
+
     err = {k: {r: {g: [] for g in REGIMES} for r in RIGS} for k in keys}
     confusion = {t: np.zeros((len(REGIMES), len(REGIMES)), dtype=np.int64) for t in thresholds}
-    
 
     for i in range(n_clips):
         frame = dataset[i]
@@ -268,15 +311,18 @@ def main() -> int:
             preds = {n: p[:, :width] for n, p in preds.items()}
 
             true_lab = frame_regimes(tgt)
-            lvdb = (
-                frame_level_db(audio[ch].astype(np.float64), width)
-                if args.level_judge
-                else None
-            )
+            lvdb = frame_level_db(audio[ch].astype(np.float64), width) if args.level_judge else None
             got = {
                 t: (
-                    infer_regimes(preds, args.zero_judge, 0.0, args.flight_thresh[0],
-                                  level_db=lvdb, level_zero_db=t[0], level_low_db=t[1])
+                    infer_regimes(
+                        preds,
+                        args.zero_judge,
+                        0.0,
+                        args.flight_thresh[0],
+                        level_db=lvdb,
+                        level_zero_db=t[0],
+                        level_low_db=t[1],
+                    )
                     if args.level_judge
                     else infer_regimes(preds, args.zero_judge, t[0], t[1], t[2], t[3])
                 )
@@ -360,9 +406,7 @@ def main() -> int:
             json.dumps(
                 {
                     "rows": rows,
-                    "confusion": {
-                        label_of(t): c.tolist() for t, c in confusion.items()
-                    },
+                    "confusion": {label_of(t): c.tolist() for t, c in confusion.items()},
                     "route": route,
                     "zero_judge": args.zero_judge,
                 },

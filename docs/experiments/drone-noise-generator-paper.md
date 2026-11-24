@@ -6,8 +6,8 @@ PTR, its published HPN comparator and DDSP-Piano are evaluated and included
 in the paper and explainer. Recording warp is excluded from current comparison
 panels and listening players. EONE code, fits and historical evidence remain
 unchanged; all 115 frozen files passed verification.
-Current proof: `results/noise_generator_paper/neural_extension/final_verification.json`.
-The detailed IEEE-SPL-styled working draft is 22 pages, not an SPL-length
+Neural extension proof: `results/noise_generator_paper/neural_extension/final_verification.json`.
+The 22-page delivery was an IEEE-SPL-styled working draft, not a letter-length
 submission. Original-campaign proof remains
 `results/noise_generator_paper/final_verification.json`.
 
@@ -15,6 +15,19 @@ submission. Original-campaign proof remains
 The wrap-up workspace's `tectonic -X watch` rebuilds both papers; the
 generator PDF is `build/generator/generator.pdf`. The delivery records below
 retain the original Quarto-era paths and checks.
+
+The supervisor revision restores the wrap-up main text's model and fitting
+structure in `src/generator-method.tex`, with shortened appendix algorithms
+for trajectory and MD2 fitting. The acoustic benchmark is unchanged.
+The 2026-11-22 trajectory revision evaluates **free-running speeds on a given
+schedule**, not pilot-command response: 13 measured held-out flights on
+three rigs, four fitted VAR-family comparators, train-only references and
+an augmented-real sensitivity check. The proposed model's phase-balanced
+score was 1.26 versus 1.49–1.57, without universal phase or per-flight
+superiority. The real-reference score was 0.74. Protocol, results, exceptions
+and reproduction commands: [flight-regime campaign](rps-flight-regimes.md#held-out-comparison-on-the-commanded-phase-schedule).
+The earlier proposed airborne-only procedural, intermittent and block-resampling
+comparison is distinct and is not claimed as completed here.
 
 ## Motivation
 

@@ -1,4 +1,5 @@
 """The CRF must be the deployed decoder, not merely similar to it."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -43,8 +44,9 @@ def test_log_partition_collapses_to_viterbi_when_sharpened():
     _, scores, span, pen = _setup(n_g=40, n_t=12)
     for scale in (50.0, 500.0):
         s, p = scores * scale, pen * scale
-        gap = (comb_crf.log_partition(s, span, p)
-               - comb_crf.path_score(s, span, p, comb_crf.viterbi(s, span, p)))
+        gap = comb_crf.log_partition(s, span, p) - comb_crf.path_score(
+            s, span, p, comb_crf.viterbi(s, span, p)
+        )
         assert float(gap.max()) < 60.0 / scale * 40.0
 
 
@@ -54,4 +56,5 @@ def test_marginals_normalize_and_pass_gradients():
     m = comb_crf.posterior_marginals(scores, span, pen)
     assert torch.allclose(m.sum(dim=1), torch.ones_like(m.sum(dim=1)), atol=1e-6)
     m.sum().backward()
+    assert scores.grad is not None
     assert bool(torch.isfinite(scores.grad).all())

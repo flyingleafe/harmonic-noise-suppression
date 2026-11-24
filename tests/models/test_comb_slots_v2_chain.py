@@ -171,14 +171,16 @@ def test_learned_transition_gets_a_gradient():
     au = _audio(seed=2)
     gt = _rps(net, _n_frames(net), seed=3)
     opt = torch.optim.SGD(net.parameters(), lr=1e-3)
-    before = net.trans.d.detach().clone()
+    trans = net.trans
+    assert trans is not None
+    before = trans.d.detach().clone()
     loss = net.loss(au, gt)
     loss.backward()
-    grad = net.trans.d.grad
+    grad = trans.d.grad
     assert grad is not None and bool(torch.isfinite(grad).all())
     assert float(grad.abs().max()) > 0.0
     opt.step()
-    assert float((net.trans.d.detach() - before).abs().max()) > 0.0
+    assert float((trans.d.detach() - before).abs().max()) > 0.0
 
 
 # ── 3.2 The grid from 10 rev/s ───────────────────────────────────────────────

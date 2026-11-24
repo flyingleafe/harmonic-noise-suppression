@@ -72,8 +72,12 @@ def local_floor(pw: np.ndarray, f: np.ndarray, span_hz: float = 120.0) -> np.nda
 
 
 def comb_score(
-    pw: np.ndarray, f: np.ndarray, noise: float, grid: np.ndarray,
-    k_max: int = 40, f_max: float = 7500.0,
+    pw: np.ndarray,
+    f: np.ndarray,
+    noise: float,
+    grid: np.ndarray,
+    k_max: int = 40,
+    f_max: float = 7500.0,
 ) -> np.ndarray:
     """Whittle comb score over a rate grid: ``(len(grid),)``, larger is better."""
     sc = np.zeros(len(grid))
@@ -94,7 +98,7 @@ def _refine(grid: np.ndarray, sc: np.ndarray, p: int) -> float:
         return float(grid[p])
     a, b, c = sc[p - 1], sc[p], sc[p + 1]
     if not (np.isfinite(a) and np.isfinite(c)):
-        return float(grid[p])   # a barred neighbour carries no curvature
+        return float(grid[p])  # a barred neighbour carries no curvature
     den = a - 2.0 * b + c
     d = 0.0 if abs(den) < 1e-30 else 0.5 * (a - c) / den
     return float(grid[p] + np.clip(d, -1.0, 1.0) * (grid[1] - grid[0]))
@@ -106,8 +110,13 @@ _ALIAS_RATIOS = (0.5, 1 / 3, 2 / 3, 1.5, 2.0, 3.0, 0.25, 4.0, 3 / 4, 4 / 3)
 
 
 def _presence(
-    pw: np.ndarray, f: np.ndarray, floor: np.ndarray, r: float,
-    k_max: int, f_max: float, thresh: float,
+    pw: np.ndarray,
+    f: np.ndarray,
+    floor: np.ndarray,
+    r: float,
+    k_max: int,
+    f_max: float,
+    thresh: float,
 ) -> float:
     """Fraction of a comb's harmonics that stand above the LOCAL floor."""
     ks = np.arange(1, k_max + 1, dtype=float)
@@ -119,8 +128,12 @@ def _presence(
 
 
 def _odd_even(
-    pw: np.ndarray, f: np.ndarray, floor: np.ndarray, r: float,
-    k_max: int, f_max: float,
+    pw: np.ndarray,
+    f: np.ndarray,
+    floor: np.ndarray,
+    r: float,
+    k_max: int,
+    f_max: float,
 ) -> float:
     """Ratio of the odd-harmonic level to the even-harmonic level of a comb.
 
@@ -146,9 +159,15 @@ def _odd_even(
 
 
 def octave_correct(
-    pw: np.ndarray, f: np.ndarray, floor: np.ndarray, r: float,
-    k_max: int = 24, f_max: float = 7500.0, ratio: float = 0.6,
-    max_mult: int = 3, r_hi: float = np.inf,
+    pw: np.ndarray,
+    f: np.ndarray,
+    floor: np.ndarray,
+    r: float,
+    k_max: int = 24,
+    f_max: float = 7500.0,
+    ratio: float = 0.6,
+    max_mult: int = 3,
+    r_hi: float = np.inf,
 ) -> float:
     """Raise a pick off a subharmonic, using the odd-to-even level ratio.
 
@@ -181,9 +200,16 @@ def octave_correct(
 
 
 def peel_scan(
-    y: np.ndarray, sr: float, grid: np.ndarray, n_src: int = 8,
-    k_max: int = 40, f_max: float = 7500.0, notch: float = 1.5,
-    exclude: float = 0.0, alias_exclude: float = 0.0, octave: bool = True,
+    y: np.ndarray,
+    sr: float,
+    grid: np.ndarray,
+    n_src: int = 8,
+    k_max: int = 40,
+    f_max: float = 7500.0,
+    notch: float = 1.5,
+    exclude: float = 0.0,
+    alias_exclude: float = 0.0,
+    octave: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Peeled comb scan of one window: ``(rates, scores)``, strongest first.
 
@@ -236,11 +262,21 @@ def peel_scan(
 
 
 def seed_tracks(
-    y: np.ndarray, sr: float, ft: np.ndarray, n_rot: int,
-    r_lo: float = 30.0, r_hi: float = 100.0, d_grid: float = 0.02,
-    win_s: float = 0.25, hop_s: float = 0.125, n_src: int = 8,
-    k_max: int = 40, f_max: float = 7500.0, max_slew: float = 10.0,
-    slew_cost: float = 3.0, gate_slew: float = 3.0,
+    y: np.ndarray,
+    sr: float,
+    ft: np.ndarray,
+    n_rot: int,
+    r_lo: float = 30.0,
+    r_hi: float = 100.0,
+    d_grid: float = 0.02,
+    win_s: float = 0.25,
+    hop_s: float = 0.125,
+    n_src: int = 8,
+    k_max: int = 40,
+    f_max: float = 7500.0,
+    max_slew: float = 10.0,
+    slew_cost: float = 3.0,
+    gate_slew: float = 3.0,
 ) -> np.ndarray:
     """Blind rotor tracks on the frame grid ``ft``: ``(n_rot, len(ft))`` rev/s.
 
@@ -297,8 +333,13 @@ def seed_tracks(
 
 
 def comb_gram(
-    y: np.ndarray, sr: float, grid: np.ndarray, win_s: float = 0.25,
-    hop_s: float = 0.125, k_max: int = 40, f_max: float = 7500.0,
+    y: np.ndarray,
+    sr: float,
+    grid: np.ndarray,
+    win_s: float = 0.25,
+    hop_s: float = 0.125,
+    k_max: int = 40,
+    f_max: float = 7500.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Whittle comb score over (window, rate): ``(S, t_centres)``.
 
@@ -369,11 +410,22 @@ def _viterbi_ridge(
 
 
 def seed_from_gram(
-    y: np.ndarray, sr: float, ft: np.ndarray, n_rot: int,
-    r_lo: float = 30.0, r_hi: float = 100.0, d_grid: float = 0.02,
-    win_s: float = 0.25, hop_s: float = 0.125, k_max: int = 40,
-    f_max: float = 7500.0, slew: float = 12.0, notch: float = 1.5,
-    stiff: float = 40.0, n_refine: int = 0, n_restart: int = 1,
+    y: np.ndarray,
+    sr: float,
+    ft: np.ndarray,
+    n_rot: int,
+    r_lo: float = 30.0,
+    r_hi: float = 100.0,
+    d_grid: float = 0.02,
+    win_s: float = 0.25,
+    hop_s: float = 0.125,
+    k_max: int = 40,
+    f_max: float = 7500.0,
+    slew: float = 12.0,
+    notch: float = 1.5,
+    stiff: float = 40.0,
+    n_refine: int = 0,
+    n_restart: int = 1,
     octave: bool = True,
 ) -> np.ndarray:
     """Blind rotor tracks by peeling ridges out of the comb-gram.
@@ -419,6 +471,7 @@ def seed_from_gram(
         noises.append(noise)
         fs, dfs = f, df
     f, df = fs, dfs
+    assert f is not None and df is not None  # `starts` always holds at least one window
 
     def notch_into(dest, r_path):
         for w in range(len(starts)):
@@ -437,9 +490,9 @@ def seed_from_gram(
         work = [pw.copy() for pw in pws]
         for r_path in exclude:
             notch_into(work, r_path)
-        S = np.stack([
-            comb_score(work[w], f, noises[w], grid, k_max, f_max) for w in range(len(starts))
-        ])
+        S = np.stack(
+            [comb_score(work[w], f, noises[w], grid, k_max, f_max) for w in range(len(starts))]
+        )
         if band is not None:
             S = S.copy()
             S[:, (grid < band[0]) | (grid >= band[1])] = -1e9
@@ -492,10 +545,14 @@ def seed_from_gram(
     # (it converges inside the same basin), so the escape has to be a different
     # STARTING basin. Forcing the first track into each band in turn guarantees
     # a restart that begins on each rotor, ranked by `joint_score`.
-    bands = [None] if n_restart <= 1 else [
-        (r_lo + j * (r_hi - r_lo) / n_restart, r_lo + (j + 1) * (r_hi - r_lo) / n_restart)
-        for j in range(n_restart)
-    ]
+    bands = (
+        [None]
+        if n_restart <= 1
+        else [
+            (r_lo + j * (r_hi - r_lo) / n_restart, r_lo + (j + 1) * (r_hi - r_lo) / n_restart)
+            for j in range(n_restart)
+        ]
+    )
     sols = [greedy(b) for b in bands]
     tracks = max(sols, key=joint_score)
 
@@ -525,9 +582,15 @@ def seed_from_gram(
 
 
 def _octave_path(
-    pws: list[np.ndarray], f: np.ndarray, floors: list[np.ndarray],
-    r_path: np.ndarray, k_max: int, f_max: float, r_hi: float,
-    ratio: float = 0.6, max_mult: int = 3,
+    pws: list[np.ndarray],
+    f: np.ndarray,
+    floors: list[np.ndarray],
+    r_path: np.ndarray,
+    k_max: int,
+    f_max: float,
+    r_hi: float,
+    ratio: float = 0.6,
+    max_mult: int = 3,
 ) -> np.ndarray:
     """Octave-correct a whole track by AGGREGATING its odd-to-even evidence.
 

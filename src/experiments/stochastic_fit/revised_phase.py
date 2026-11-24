@@ -219,7 +219,7 @@ import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 import torch
@@ -295,13 +295,12 @@ CALIBRATED_MIN_RPS = 20.0
 #: the 30 Hz shape-control floor (~33 ms).
 FLOOR_PSD_OVERSAMPLE = 4
 
-_SPEC_DEFAULTS = {f.name: f.default for f in dataclasses.fields(Spec)}
 #: The speed-law exponent initialization: read from :class:`model.Spec`'s own
-#: defaults rather than copied, so the revised floor is the existing floor.
+#: default rather than copied, so the revised floor is the existing floor.
 #: The floor-shape prior scale and correlation length moved to
 #: :mod:`data_processing.noise_model.constants`, which ``Spec`` now defaults
 #: from; they are imported above and re-exported unchanged.
-AMP_EXP_INIT = float(_SPEC_DEFAULTS["amp_rps_exponent"])
+AMP_EXP_INIT = float(Spec.amp_rps_exponent)
 STAGE1_LADDER_RECIPE = "band_energy_ladder"
 STAGE1_LADDER_RUNG_ORDERS = (16, 48, None)
 STAGE1_LADDER_RUNG_ITERS = (40, 40, None)
@@ -661,7 +660,7 @@ def conditional_r_tau(tau_s: Any, *, d: Any) -> Any:
     return xp.exp(-d * xp.abs(tau_s))
 
 
-def prior_r_tau(tau_s: Any, k: Any, *, lam: float, sigma: float, d: Any) -> Any:
+def prior_r_tau(tau_s: Any, k: Any, *, lam: float, sigma: float | Tensor, d: Any) -> Any:
     """PRIOR / held-out predictive residual autocorrelation::
 
         R_k(tau) = exp( -D|tau| - k^2 sigma^2 [ |tau|/lam
@@ -1398,12 +1397,30 @@ def _check_order_domain(
         )
 
 
+class _TensorOpts(TypedDict):
+    """Factory keyword arguments shared by the model's parameter tensors."""
+
+    dtype: torch.dtype
+    device: torch.device
+
+
 class _RevisedModel(torch.nn.Module):
     """The candidate's expected periodogram and its parameters.
 
     One module for the whole rig: the physical parameters are shared by every
     clip, each clip owns its whitened state innovations and its bias.
     """
+
+    # buffers registered in __init__ (register_buffer leaves them untyped)
+    band: Tensor
+    window_work: Tensor
+    k_orders: Tensor
+    win_idx_work: Tensor
+    tau_s_work: Tensor
+    transfer_power: Tensor
+    floor_shape_psd: Tensor
+    floor_tilt_oct_psd: Tensor
+    shape_chol: Tensor
 
     def __init__(
         self,
@@ -1567,7 +1584,7 @@ class _RevisedModel(torch.nn.Module):
                     periodogram(clip, n_fft, hop).power, dtype=torch.float32
                 )  # kept on the CPU; one chunk at a time is moved to the device
 
-        f64 = dict(dtype=torch.float64, device=dev)
+        f64 = _TensorOpts(dtype=torch.float64, device=dev)
         zeros = lambda *s: torch.nn.Parameter(torch.zeros(*s, **f64))  # noqa: E731
         self.profile_db = zeros(self.n_rotors, self.K)
         self.amp_exp = torch.nn.Parameter(torch.tensor(AMP_EXP_INIT, **f64))
@@ -2894,6 +2911,7 @@ def _optimize_fixed_carrier_marginal(
     except RuntimeError as exc:
         termination = f"lbfgs_runtime_error: {exc}"
     final, final_grad = evaluate("final_full_objective", backward=True)
+    assert final_grad is not None  # backward=True always measures the gradient norm
     if progress is not None:
         progress(f"fixed-carrier marginal full J {initial:.6f} -> {final:.6f}")
     finite_trace = np.isfinite([entry["full_objective"] for entry in closure_trace]).all()
@@ -3352,7 +3370,7 @@ def fit_revised(
     )
     for key, value in provenance.items():
         training_provenance.setdefault(key, value)
-    export = dict(
+    export: dict[str, Any] = dict(
         schema_version=SCHEMA_VERSION,
         model_family=MODEL_FAMILY,
         fit_method=config.fit_method,

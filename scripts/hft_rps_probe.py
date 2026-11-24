@@ -82,10 +82,12 @@ def main() -> int:
     x = torch.randn(2, n, device=dev)
     with torch.no_grad():
         y = model(x, return_attention=True)
+    attn = model.last_attention
+    assert attn is not None  # return_attention=True stores it
     report["shape"] = {
         "logits": list(y.shape),
         "expected_T": model.num_grid_frames(n),
-        "attention": list(model.last_attention.shape),
+        "attention": list(attn.shape),
         "grid_step_revs": float(model.output_freqs()[1] - model.output_freqs()[0]),
         "finite": bool(torch.isfinite(y).all()),
     }

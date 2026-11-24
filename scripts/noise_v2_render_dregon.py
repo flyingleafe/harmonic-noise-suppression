@@ -52,6 +52,7 @@ from typing import Any, NoReturn
 
 import numpy as np
 
+from data_processing.noise_model.constants import AMP_RPS_REF
 from experiments.noise_model import gates as GT
 from experiments.noise_model import render as RD
 from experiments.noise_model import spectrum as SP
@@ -469,7 +470,7 @@ def envelope_report(params: dict[str, Any], f0_rotor: np.ndarray) -> dict[str, A
     carries ``speed ** amp_exp`` in POWER and the floor
     ``mean_r(speed ** floor_exp) + floor_static_rel``.
     """
-    s = np.asarray(f0_rotor, dtype=np.float64) / float(RD.AMP_RPS_REF)
+    s = np.asarray(f0_rotor, dtype=np.float64) / float(AMP_RPS_REF)
     amp_exp = float(params["profile"]["amp_exp"])
     floor_exp = float(params["floor"]["floor_exp"])
     rel = float(params["floor"]["floor_static_rel"])
@@ -746,7 +747,7 @@ def run(
             ),
             sigma_nu=float(fit["params"]["sigma_nu"]),
             lam=float(fit["params"]["lam"]),
-            amp_rps_ref=float(RD.AMP_RPS_REF),
+            amp_rps_ref=float(AMP_RPS_REF),
             pool_carrier_rev_s=[
                 (diag.get("batch") or {}).get("carrier_min_rev_s"),
                 (diag.get("batch") or {}).get("carrier_max_rev_s"),
@@ -813,7 +814,7 @@ def run(
             per_rotor_mean_rps=[float(v) for v in f0_rotor],
             per_rotor_min_rps=[float(v) for v in reference.min(axis=1)],
             per_rotor_max_rps=[float(v) for v in reference.max(axis=1)],
-            speed_norm=[float(v / RD.AMP_RPS_REF) for v in f0_rotor],
+            speed_norm=[float(v / AMP_RPS_REF) for v in f0_rotor],
             demod_rotors=list(demod),
             envelope_at_dregon_cruise=envelope_report(fit["params"], f0_rotor),
             envelope_at_bench_carrier=envelope_report(fit["params"], bench_carrier),

@@ -182,7 +182,9 @@ def test_battery_point_at_the_sc_source_law_recovers_the_source() -> None:
     shape = DW.sc_shape(2.0, 0.5, 2.0, sr=SR, clip_s=2.0, n_mc=4, seed=1)
     stage = _payload(DW.sc_block(LEVEL_DB, 2.0, 0.5, 2.0, shape), -45.0)
     ctx = _battery_context(stage)
-    row = DW.battery_point(ctx, *DW.source_law(stage), source=True)
+    law = DW.source_law(stage)
+    assert law is not None
+    row = DW.battery_point(ctx, *law, source=True)
     # the inner fit lands on the source, so the sim is the 'real' render itself
     assert np.allclose(row["level_db"], LEVEL_DB, atol=0.01), row["level_db"]
     assert abs(row["floor_mean_db"] + 45.0) < 0.01, row["floor_mean_db"]

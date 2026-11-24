@@ -451,6 +451,7 @@ NOTES = [
 def main(argv: list[str] | None = None) -> int:
     import subprocess
 
+    assert __doc__ is not None  # the module docstring is the CLI description
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default="results/noise_v4/similarity/")
     ap.add_argument(

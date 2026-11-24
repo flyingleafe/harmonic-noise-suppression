@@ -58,7 +58,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import numpy as np
 
@@ -79,7 +79,7 @@ REQUIRED_GATE_KEYS = (
 LTAS_N = 8192
 
 
-def die(message: str) -> None:
+def die(message: str) -> NoReturn:
     raise SystemExit(f"error: {message}")
 
 
@@ -837,7 +837,7 @@ class Tracker:
         # the frozen scorer's output grid: linear 0-150 rev/s in 300 bins, the
         # metric's pre-rp-protocol default (conf/metrics/salience_layers_r150.yaml);
         # an rp-protocol scorer passes its own `metric` kwargs (salience_layers_rp.yaml)
-        metric = dict(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
+        metric: dict[str, Any] = dict(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
         metric.update(scorer.get("metric") or {})
         self.metric = LayerPeakRPSMetric(**metric)
         self.score = probe_helpers().score
@@ -1274,7 +1274,7 @@ def calibration_temperature(
 
 
 def run_plan(man: dict[str, Any], out: Path, *, provenance: dict[str, Any] | None = None) -> int:
-    payload = dict(
+    payload: dict[str, Any] = dict(
         mode="plan",
         schema=RE.SCHEMA,
         manifest=dict(path=man["_path"], sha256=man["_digest"]),
@@ -1463,7 +1463,7 @@ def run_prepare(
         for regime_spec in cohort["regimes"]:
             regime = str(regime_spec["regime"])
             bundles = bundles_by_regime[regime]
-            sel = (
+            sel: dict[str, Any] = (
                 calibration_scores(cohort, regime_spec, bundles, n_mics=n_mics)
                 if bundles and bool(regime_spec.get("select_family", True))
                 else dict(regime=regime, selection=dict(chosen=None), per_family={})

@@ -1,0 +1,110 @@
+---
+title: "Rotor-speed validation, one split per drone"
+subtitle: "Four measured motor speeds · six fitted generators · seven datasets"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    page-layout: full
+    toc: false
+    include-in-header: assets/plotly.html
+execute:
+  echo: false
+---
+
+## Held-out scores
+
+Every method is fitted on the **same training recordings of the same drone** and generates 32 paths on each validation schedule. Lower is better. The row mean gives equal weight to the *observed* phases; within a phase each physical validation recording gets equal weight. A cruise-only row is not comparable to a five-phase row as a measure of task difficulty. Bold identifies the lowest number in each row, not statistical significance.
+
+::: {.table-responsive}
+
+{{< include assets/balanced.md >}}
+
+:::
+
+The proposed method is the **regulated bridge**, not the earlier chunkwise template. The template and the two hybrid generators use their fitted cruise processes on already-airborne records. No launch, standby or touchdown is invented to fill an empty phase. Blackbird has only one accessible recording: its validation is later in the same flight, with a 16-second guard. NeuroBEM segments from one physical flight stay together; NanoBench uses the publisher's train/test assignment. On VID the two circular flights are held out together and the four original flights train every method. They previously served as a confirmation pair; this comparison is not another independent replication.
+
+The bridge ranks first on four drones: MD2, DREGON, VID and NeuroBEM. It also beats the template on PI-TCN, but the VAR-HSMM hybrid scores better. The largest loss is NanoBench (bridge 2.435, VAR-HSMM 1.431). On Blackbird, phase VAR(4) wins and the bridge misses the absolute operating level: in the middle scored window the measured collective averages 184.2 rev/s, versus a median of 128.9 across bridge draws. The template gives 181.0. These are **within-drone held-out comparisons**, not evidence of a winner on every airframe or regime.
+
+## Measured and generated trajectories
+
+Choose any validation trace. Each panel shows the four motors in the same order and units (rev/s). All seven panels share time and speed axes. The generated path is **draw 0**, never the closest of 32. Drag a rectangle to zoom or double-click to reset. Event views are display crops on the supplied clock, not additional scoring windows.
+
+```{ojs}
+//| output: false
+pack = FileAttachment("assets/trajectories.json").json()
+windows = {
+ const time=(i)=>i/pack.fs, end=time(target.n-1), ev=target.events;
+ const all={"Whole recording":[0,end]};
+ if(ev.motors_on!=null) all["Arming"]=[time(ev.motors_on),Math.min(end,time(ev.motors_on)+3)];
+ if(ev.takeoff!=null) {
+   all["Before takeoff"]=[Math.max(0,time(ev.takeoff)-2),time(ev.takeoff)];
+   all["Takeoff"]=[time(ev.takeoff),Math.min(end,time(ev.takeoff)+4)];
+ }
+ if(end>16) all["Middle 16 seconds"]=[end/2-8,end/2+8];
+ if(ev.landing!=null) all["Landing"]=[Math.max(0,time(ev.landing)-.5),Math.min(end,time(ev.landing)+4)];
+ return all;
+}
+series = {
+ const entries=Object.entries(target.paths).map(([k,s])=>{
+   const bytes=Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+   return [k,new Float32Array(bytes.buffer)];
+ });
+ return Object.fromEntries(entries);
+}
+```
+
+```{ojs}
+viewof rig = Inputs.select(Object.keys(pack.rigs), {label:"Drone",format:k=>pack.rigs[k].label})
+viewof target = Inputs.select(pack.rigs[rig].targets,{label:"Validation trace",format:t=>t.id})
+viewof view = Inputs.select(Object.keys(windows),{label:"Time window"})
+trajectoryPlot = {
+ const div=html`<div style="width:100%;min-height:650px"></div>`;
+ const n=target.n,[a,b]=windows[view], methods=Object.keys(pack.methods), cols=width<660?1:2,rows=Math.ceil(methods.length/cols);
+ const layout={width,height:rows*200+65,margin:{t:50,b:55,l:58,r:15},grid:{rows,columns:cols,pattern:'independent',ygap:.28,xgap:.1},legend:{orientation:'h',y:-.04},annotations:[],title:{text:pack.rigs[rig].label+' · '+target.id,font:{size:15}},showlegend:true};
+ const traces=[],rotors=['Front right','Front left','Rear left','Rear right'];let low=Infinity,high=-Infinity;
+ for(const k of methods){const data=series[k];for(let h=0;h<4;h++)for(let t=Math.max(0,Math.floor(a*pack.fs));t<=Math.min(n-1,Math.ceil(b*pack.fs));t++){const v=data[h*n+t];if(Number.isFinite(v)){low=Math.min(low,v);high=Math.max(high,v);}}}
+ const pad=Math.max(.3,(high-low)*.04);
+ methods.forEach((k,i)=>{const s=i?String(i+1):'', x='x'+s,y='y'+s;
+   layout['xaxis'+s]={range:[a,b],matches:i?'x':undefined,title:{text:i>=methods.length-cols?'Time (s)':''}};
+   layout['yaxis'+s]={range:[low-pad,high+pad],matches:i?'y':undefined,title:{text:i%cols===0?'rev/s':''}};
+   layout.annotations.push({text:pack.methods[k],xref:x+' domain',yref:y+' domain',x:0,y:1,xanchor:'left',yanchor:'bottom',showarrow:false,font:{size:13}});
+   for(let h=0;h<4;h++)traces.push({x0:0,dx:1/pack.fs,y:series[k].subarray(h*n,(h+1)*n),xaxis:x,yaxis:y,type:'scatter',mode:'lines',name:rotors[h],legendgroup:String(h),showlegend:i===0,line:{color:pack.colors[h],width:1.2},hovertemplate:'%{x:.2f} s · %{y:.2f} rev/s<extra>'+rotors[h]+'</extra>'});
+ });
+ await globalThis.Plotly.newPlot(div,traces,layout,{responsive:true,displaylogo:false,scrollZoom:true});
+ invalidation.then(()=>globalThis.Plotly.purge(div));
+ return div;
+}
+```
+
+## Scores by observed phase
+
+Short phases use the joint path and excursion energy score; cruise uses the joint four-motor mean-speed and complex cross-spectrum energy score. The normalization is set from training data, not the validation path. For an individual validation flight too short to support a 16-second cruise window, there is no cruise score; its trace remains available above when a usable schedule exists.
+
+::: {.table-responsive}
+
+{{< include assets/phase-scores.md >}}
+
+:::
+
+## All validation traces, including short ones
+
+The following supplementary score applies the ordered four-motor path term to the **entire available trace**, rather than requiring 16 seconds of cruise. Distances are RMS differences in rev/s, with the same fair ensemble energy score. All methods are scored on the same motor samples. Common time below 100% means at least one method lacks a fitted response on part of a trace; those samples are neither filled with zeros nor credited to that method. We average segments within physical recording before averaging recordings. This score does **not** replace the spectral score: unrelated cruise maneuvers need not occur at the same instant.
+
+::: {.table-responsive}
+
+{{< include assets/whole-path.md >}}
+
+:::
+
+## Fitted model sizes
+
+The bridge count is its portable law, including coefficients for commanded phases even when they were absent in training. The template count includes its stored curve samples; these are not all independent statistical degrees of freedom. Where no transitions were observed the template uses only its cruise component. Fewer bridge coefficients on an end-to-end flight therefore need not imply a smaller model for cruise alone.
+
+::: {.table-responsive}
+
+{{< include assets/model-sizes.md >}}
+
+:::
+
+[Split manifest](../../../results/rps_traj/per_drone/pack/manifest.json) · [Per-phase CSV](../../../results/rps_traj/per_drone/phase_scores.csv) · [All-trace CSV](../../../results/rps_traj/per_drone/whole_path_scores.csv)

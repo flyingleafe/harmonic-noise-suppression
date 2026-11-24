@@ -112,7 +112,7 @@ def antialias_filter(
     attenuation = max(float(stop_db), _ripple_attenuation_db(ripple_db))
     n_taps, beta = kaiserord(attenuation, width)
     n_taps = int(n_taps) | 1  # firwin wants an odd length for a type-I linear phase
-    taps = firwin(n_taps, (pass_hz + stop_hz) / 2.0, window=("kaiser", beta), fs=sample_rate)
+    taps = firwin(n_taps, (pass_hz + stop_hz) / 2.0, window=("kaiser", beta), fs=sample_rate)  # pyright: ignore[reportArgumentType]  # scipy is unannotated: window inferred str from its default; a (name, beta) tuple is documented
     return AntialiasFilter(
         taps=np.asarray(taps, dtype=np.float64),
         sample_rate=float(sample_rate),

@@ -341,7 +341,7 @@ def score_cruise(
     logpdf, n = mean_logpdf(model, blocks, burn)
     out: dict[str, Any] = {"logpdf": logpdf, "n_scored": n, "diverged": False}
     rng = np.random.default_rng(seed + 1)
-    limit = DIVERGED_STD * float(np.sqrt(np.mean([np.mean(b * b) for b in blocks])))
+    limit = DIVERGED_STD * float(np.sqrt(np.mean(np.asarray([np.mean(b * b) for b in blocks]))))
     gen = generated_blocks(model, blocks, rng)
     if not all(np.isfinite(g).all() and np.abs(g).max() < limit for g in gen):
         out["diverged"] = True
@@ -525,7 +525,7 @@ def score_flights(
         if draws.size >= 2 and obs:
             entry["crps"] = float(np.mean([crps(draws, o) for o in obs]))
             entry["median"] = float(np.median(draws))
-            entry["abs_err"] = float(np.mean([abs(np.median(draws) - o) for o in obs]))
+            entry["abs_err"] = float(np.mean(np.asarray([abs(np.median(draws) - o) for o in obs])))
         out["readouts"][key] = entry
     if not ok:
         return out

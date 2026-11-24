@@ -23,6 +23,8 @@ Architecture summary:
     soft centroid → RPS (T_hcqt) → interpolate → (4, T_stft)
 """
 
+from typing import TYPE_CHECKING, Any, cast
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -30,6 +32,9 @@ import torch.nn.functional as F
 
 from models.multif0.hcqt import freq_grid
 from models.multif0.model import LateDeep
+
+if TYPE_CHECKING:
+    from models.frontends import SpectralFrontEnd
 
 
 def stft_time_frames(audio_length: int, hop_length: int = 512, n_fft: int = 2048) -> int:
@@ -60,6 +65,8 @@ class MultiF0RPSPredictor(nn.Module):
         Passed to the default HCQTFrontEnd constructor.
     """
 
+    freq_grid: torch.Tensor
+
     def __init__(
         self,
         n_fft: int = 2048,
@@ -67,7 +74,7 @@ class MultiF0RPSPredictor(nn.Module):
         num_rotors: int = 4,
         n_harmonics: int = 5,
         temperature: float = 1.0,
-        frontend: nn.Module | None = None,
+        frontend: "SpectralFrontEnd | None" = None,
         **frontend_kwargs,
     ):
         super().__init__()
@@ -101,10 +108,12 @@ class MultiF0RPSPredictor(nn.Module):
             and hasattr(frontend, "n_octaves")
             and hasattr(frontend, "over_sample")
         ):
+            # Duck-typed: any front-end exposing an HCQT grid (fmin/n_octaves/over_sample).
+            grid_fe = cast(Any, frontend)
             fg = freq_grid(
-                fmin=frontend.fmin,
-                n_octaves=frontend.n_octaves,
-                over_sample=frontend.over_sample,
+                fmin=grid_fe.fmin,
+                n_octaves=grid_fe.n_octaves,
+                over_sample=grid_fe.over_sample,
             )
         else:
             fg = freq_grid()  # default paper params
@@ -120,7 +129,6 @@ class MultiF0RPSPredictor(nn.Module):
         Returns:
             rps:   (B, num_rotors, T_stft) predicted rotor speeds in Hz.
         """
-        B = audio.shape[0]
         N = audio.shape[-1] if audio.dim() == 3 else audio.shape[-1]
         T_stft = stft_time_frames(N, self.hop_length, self.n_fft)
 

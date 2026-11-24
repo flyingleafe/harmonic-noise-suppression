@@ -108,7 +108,8 @@ def main() -> None:
     summary = json.loads(args.fit.read_text())
     entries = list(summary["clips"].values())
     fm = zoo.load(MODEL, ckpt="best")
-    metric = LayerPeakRPSMetric()
+    # hppnet_l2_r2_s0's output grid (conf/metrics/salience_layers_r150.yaml)
+    metric = LayerPeakRPSMetric(grid=dict(kind="linear", fmin=0.0, fmax=150.0, bins=300))
     OUT.mkdir(parents=True, exist_ok=True)
 
     windows = real_windows(

@@ -11,7 +11,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from scipy.signal import welch
 
-from plots.paper import paper_style
+from plots.paper import TEXT_IN, paper_style
 
 LABELS = {
     "reference": "Recorded reference",
@@ -63,6 +63,50 @@ COLOURS = {
     "doerfler2026_hpn_regimes": "C2",
     "renault2023_piano_regimes": "C7",
 }
+
+
+def schedule_example(example: Mapping[str, np.ndarray], rate_hz: float) -> Figure:
+    """Held-out event clock: observed collective speed/spread and ensemble intervals."""
+    with paper_style():
+        fig, axs = plt.subplots(
+            2,
+            4,
+            figsize=(TEXT_IN, 2.75),
+            sharex="col",
+            gridspec_kw={"width_ratios": [1.2, 1, 1, 1]},
+        )
+        panels = (
+            ("startup_standby", "Start-up and standby", "From motors-on (s)"),
+            ("takeoff", "Takeoff", "From takeoff (s)"),
+            ("cruise", "Cruise", "In cruise window (s)"),
+            ("landing", "Landing", "From landing (s)"),
+        )
+        for col, (phase, label, xlabel) in enumerate(panels):
+            truth = example[f"{phase}__real"]
+            t = (np.arange(truth.shape[-1]) + float(example[f"{phase}__lo"])) / rate_hz
+            for row, reduce in enumerate((np.mean, np.ptp)):
+                ax = axs[row, col]
+                for arm, name, color, style in (
+                    ("ours", "Proposed", "C0", "-"),
+                    ("phasevar4", "Phase VAR(4)", "C1", "--"),
+                ):
+                    values = reduce(example[f"{phase}__{arm}"], axis=1)
+                    low, med, high = np.quantile(values, (0.1, 0.5, 0.9), axis=0)
+                    ax.fill_between(t, low, high, color=color, alpha=0.17, linewidth=0)
+                    ax.plot(t, med, color=color, ls=style, label=name)
+                ax.plot(t, reduce(truth, axis=0), color="black", label="Measured", lw=0.9)
+                ax.set_xlim(t[0], t[-1])
+                if phase != "cruise" or row == 1:
+                    ax.set_ylim(bottom=0)
+                ax.grid(axis="y")
+                ax.spines[["right", "top"]].set_visible(False)
+            axs[0, col].set_title(label)
+            axs[1, col].set_xlabel(xlabel)
+        axs[0, 0].set_ylabel("Mean (rev/s)")
+        axs[1, 0].set_ylabel("Range (rev/s)")
+        fig.legend(*axs[0, 0].get_legend_handles_labels(), loc="upper center", ncol=3)
+        fig.subplots_adjust(left=0.075, right=0.99, bottom=0.16, top=0.80, wspace=0.34, hspace=0.14)
+        return fig
 
 
 def treatment(method: str) -> str:

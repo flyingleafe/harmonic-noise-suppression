@@ -349,6 +349,7 @@ class Window:
             key=self.key,
         )
 
+
 def widened_training_window(window: Window, guard_seconds: float) -> Window:
     """The one shared symmetric fit-support guard used by prepare/check paths."""
     guard = float(guard_seconds)
@@ -366,8 +367,6 @@ def widened_training_window(window: Window, guard_seconds: float) -> Window:
 def overlaps_guarded_training(scored: Window, training: Window, *, guard_seconds: float) -> bool:
     """Does ``scored`` touch the symmetrically guarded training support?"""
     return scored.overlaps(widened_training_window(training, guard_seconds))
-
-
 
 
 def union_seconds(windows: Sequence[Window]) -> float:
@@ -465,8 +464,16 @@ def resolve_evaluation_windows(
         Window(rec.recording_id, float(t0), float(dur), regime=regime, role="evaluation")
         for t0, dur in found
     ]
-    dropped = [w.key for w in candidates if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
-    disjoint = [w for w in candidates if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
+    dropped = [
+        w.key
+        for w in candidates
+        if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)
+    ]
+    disjoint = [
+        w
+        for w in candidates
+        if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)
+    ]
     kept = disjoint[: max(int(max_windows), 0)]
     note = ""
     if len(kept) < int(max_windows):
@@ -612,8 +619,16 @@ def check_explicit_windows(
     for rid in sorted({w.recording for w in windows}):
         mine = [w for w in windows if w.recording == rid]
         cal = [w for w in calibration if w.recording == rid]
-        bad = [w for w in mine if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
-        good = [w for w in mine if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)]
+        bad = [
+            w
+            for w in mine
+            if any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)
+        ]
+        good = [
+            w
+            for w in mine
+            if not any(overlaps_guarded_training(w, c, guard_seconds=guard_seconds) for c in cal)
+        ]
         want = int(requested if requested is not None else len(mine))
         kept.extend(good)
         reports.append(
@@ -954,10 +969,8 @@ def _valid_fixed_ou_hyperparameters(diag: Mapping[str, Any]) -> bool:
     fixed = diag.get("fixed_ou_hyperparameters")
     if not isinstance(fixed, Mapping):
         return False
-    vals = [fixed.get("lambda_"), fixed.get("sigma")]
+    vals: list[Any] = [fixed.get("lambda_"), fixed.get("sigma")]
     return all(math.isfinite(float(v)) and float(v) > 0.0 for v in vals)
-
-
 
 
 def _valid_fixed_carrier_marginal_fit(stage: Any) -> bool:
@@ -1073,7 +1086,10 @@ def _validate_fixed_carrier_zero_bias(path: Path, params: Mapping[str, Any]) -> 
         if key not in params:
             raise ValueError(f"{path}: fixed_carrier_marginal requires parameters.{key}=0")
         if not _all_numeric_zero(params[key]):
-            raise ValueError(f"{path}: fixed_carrier_marginal requires parameters.{key} to be exactly zero")
+            raise ValueError(
+                f"{path}: fixed_carrier_marginal requires parameters.{key} to be exactly zero"
+            )
+
 
 def read_candidate_export(path: str | Path) -> CandidateExport:
     """Read and pin a revised export; refuse legacy, C1, and malformed C2 records."""
@@ -1112,7 +1128,9 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
     if fit_method == "marginal_then_carrier":
         for stage in ("marginal_fit", "carrier_fit"):
             if not _valid_stage_fit(diag.get(stage)):
-                raise ValueError(f"{p}: diagnostics.{stage}.valid must be true with finite diagnostics")
+                raise ValueError(
+                    f"{p}: diagnostics.{stage}.valid must be true with finite diagnostics"
+                )
     elif fit_method == "alternating_conditional_map":
         if not _valid_alternating_fit(diag.get("alternating_conditional_map")):
             raise ValueError(
@@ -1147,7 +1165,9 @@ def read_candidate_export(path: str | Path) -> CandidateExport:
             raise ValueError(
                 f"{p}: fixed_carrier_marginal must not claim a valid diagnostics.carrier_fit"
             )
-        optimizer = dict(summary["training_provenance"]).get("optimizer") or diag["marginal_fit"].get("optimizer")
+        optimizer = dict(summary["training_provenance"]).get("optimizer") or diag[
+            "marginal_fit"
+        ].get("optimizer")
         if not isinstance(optimizer, Mapping) or not optimizer:
             raise ValueError(
                 f"{p}: fixed_carrier_marginal requires optimizer provenance in "
@@ -1814,7 +1834,7 @@ def unnormalized_gain_total(
     u_by_draw: list[float] = []
     for terms_seq in draw_terms:
         total = 0.0
-        for it, w, terms in zip(items, weights, terms_seq, strict=True):
+        for _it, w, terms in zip(items, weights, terms_seq, strict=True):
             total += float(np.sum(np.asarray(terms, dtype=np.float64) * w))
         u_by_draw.append(total)
     return dict(u_by_draw=u_by_draw, exposure_h=h)
@@ -2395,7 +2415,7 @@ def composite_delta_gate(
             reason="the frozen record carries no composite tolerance for this cohort/regime",
         )
     recs = sorted(set(baseline) & set(candidate))
-    rows = [
+    rows: list[dict[str, Any]] = [
         dict(
             recording=r,
             baseline=float(baseline[r]),
@@ -2477,7 +2497,7 @@ def ltas_gate(
             ),
         )
     keys = sorted(set(baseline) & set(candidate))
-    rows = [
+    rows: list[dict[str, Any]] = [
         dict(
             unit=k,
             baseline_mean_abs_db=float(baseline[k]),
@@ -2546,7 +2566,7 @@ def conditional_non_regression_gate(
             ),
         )
     keys = sorted(set(baseline) & set(candidate))
-    rows = [
+    rows: list[dict[str, Any]] = [
         dict(
             block=k,
             baseline=float(baseline[k]),
@@ -2558,7 +2578,9 @@ def conditional_non_regression_gate(
     regime_of = dict(regimes) if regimes is not None else {}
     required = [str(r) for r in required_regimes] if required_regimes is not None else None
     present_regimes = sorted({regime_of.get(k, "") for k in keys if regime_of.get(k)})
-    missing_regimes = sorted(set(required or []) - set(present_regimes)) if required is not None else []
+    missing_regimes = (
+        sorted(set(required or []) - set(present_regimes)) if required is not None else []
+    )
 
     if regime_of:
         by_regime: dict[str, list[float]] = {}
@@ -2585,7 +2607,9 @@ def conditional_non_regression_gate(
                         draw_means.append(float(np.mean([vals[i] for i in idx])))
                 draws.append(float(np.mean(draw_means)))
             boot_means = np.asarray(draws)
-        mean_delta = float(np.mean(list(per_regime_mean.values()))) if per_regime_mean else float("nan")
+        mean_delta = (
+            float(np.mean(list(per_regime_mean.values()))) if per_regime_mean else float("nan")
+        )
         upper = float(np.quantile(boot_means, 1.0 - alpha)) if boot_means.size else None
         interval = ClusterInterval(
             n=int(len(keys)),
@@ -2665,7 +2689,7 @@ def michaels_ratio_gate(
     required = [str(r) for r in required_regimes] if required_regimes else None
     per_regime: dict[str, Any] = {}
     for regime in sorted(blocks):
-        rows = [
+        rows: list[dict[str, Any]] = [
             dict(
                 block=str(b["key"]),
                 baseline=float(b["baseline"]),

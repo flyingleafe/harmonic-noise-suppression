@@ -1,6 +1,6 @@
 import math  # Added for PositionalEncoding
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn.functional as F
@@ -18,18 +18,7 @@ from models.edge_bs_rof.attend import Attend
 # Helper functions
 
 
-def exists(val):
-    """
-    Check if input value exists (is not None)
-    Args:
-        val: Any input value
-    Returns:
-        bool: True if val is not None, otherwise False
-    """
-    return val is not None
-
-
-def default(v, d):
+def default[T](v: T | None, d: T) -> T:
     """
     Return default value, returns v if v exists, otherwise returns default value d
     Args:
@@ -38,7 +27,7 @@ def default(v, d):
     Returns:
         v if v exists, otherwise d
     """
-    return v if exists(v) else d
+    return v if v is not None else d
 
 
 def pack_one(t, pattern):
@@ -106,6 +95,8 @@ class PositionalEncoding(Module):
         dim: Encoding dimension
         max_seq_len: Maximum sequence length
     """
+
+    pe: torch.Tensor
 
     def __init__(self, dim, max_seq_len=1000):
         super().__init__()
@@ -204,7 +195,7 @@ class Attention(Module):
         q, k, v = rearrange(self.to_qkv(x), "b n (qkv h d) -> qkv b h n d", qkv=3, h=self.heads)
 
         # Apply rotary positional encoding
-        if self.use_rotary_pos and exists(self.rotary_embed):
+        if self.use_rotary_pos and self.rotary_embed is not None:
             q = self.rotary_embed.rotate_queries_or_keys(q)
             k = self.rotary_embed.rotate_queries_or_keys(k)
 
@@ -355,9 +346,11 @@ class Transformer(Module):
 
     def forward(self, x):
         if not self.use_rotary_pos:
+            assert self.positional_encoding is not None
             x = self.positional_encoding(x)
         # Pass through each layer sequentially with residual connections
-        for attn, ff in self.layers:
+        for layer in self.layers:
+            attn, ff = cast(ModuleList, layer)
             x = attn(x) + x  # Attention layer + residual
             x = ff(x) + x  # Feed-forward network + residual
 
@@ -417,7 +410,7 @@ class BandSplit(Module):
         return torch.stack(outs, dim=-2)
 
 
-def MLP(dim_in, dim_out, dim_hidden=None, depth=1, activation=nn.Tanh):
+def MLP(dim_in: int, dim_out: int, dim_hidden: int | None = None, depth=1, activation=nn.Tanh):
     """
     Multi-Layer Perceptron (MLP) module:
     Uses multiple linear layers and activation functions stacked to achieve non-linear mapping,
@@ -822,15 +815,14 @@ class BSRoformer(Module):
 
         # Split spectrum data into multiple preset bands through band split module
         if self.use_torch_checkpoint:
-            x = checkpoint(self.band_split, x, use_reentrant=False)
+            x = cast(torch.Tensor, checkpoint(self.band_split, x, use_reentrant=False))
         else:
             x = self.band_split(x)
 
         # Enter multi-layer Transformer modules for axial (time/frequency) attention processing
-        store = [None] * len(
-            self.layers
-        )  # Store each layer's output (used if skip connection enabled)
-        for i, transformer_block in enumerate(self.layers):
+        store: list[torch.Tensor] = []  # Each layer's output (used if skip connection enabled)
+        for i, block in enumerate(self.layers):
+            transformer_block = cast(ModuleList, block)
             if len(transformer_block) == 3:
                 # If current layer has three sub-modules, it contains linear attention module
                 linear_transformer, time_transformer, freq_transformer = transformer_block
@@ -839,7 +831,7 @@ class BSRoformer(Module):
                 x, ft_ps = pack([x], "b * d")
                 if self.use_torch_checkpoint:
                     # Use checkpoint mechanism to save memory
-                    x = checkpoint(linear_transformer, x, use_reentrant=False)
+                    x = cast(torch.Tensor, checkpoint(linear_transformer, x, use_reentrant=False))
                 else:
                     x = linear_transformer(x)
                 # Unpack to restore original shape
@@ -857,7 +849,7 @@ class BSRoformer(Module):
             x = rearrange(x, "b t f d -> b f t d")
             x, ps = pack([x], "* t d")
             if self.use_torch_checkpoint:
-                x = checkpoint(time_transformer, x, use_reentrant=False)
+                x = cast(torch.Tensor, checkpoint(time_transformer, x, use_reentrant=False))
             else:
                 x = time_transformer(x)
             (x,) = unpack(x, ps, "* t d")
@@ -866,14 +858,14 @@ class BSRoformer(Module):
             x = rearrange(x, "b f t d -> b t f d")
             x, ps = pack([x], "* f d")
             if self.use_torch_checkpoint:
-                x = checkpoint(freq_transformer, x, use_reentrant=False)
+                x = cast(torch.Tensor, checkpoint(freq_transformer, x, use_reentrant=False))
             else:
                 x = freq_transformer(x)
             (x,) = unpack(x, ps, "* f d")
 
             if self.skip_connection:
                 # Save current layer output for subsequent skip connections
-                store[i] = x
+                store.append(x)
 
         # Final normalization on all Transformer layer outputs
         x = self.final_norm(x)
@@ -884,7 +876,11 @@ class BSRoformer(Module):
         # Estimate separation mask for each source, using checkpoint (if enabled) to reduce memory usage
         if self.use_torch_checkpoint:
             mask = torch.stack(
-                [checkpoint(fn, x, use_reentrant=False) for fn in self.mask_estimators], dim=1
+                [
+                    cast(torch.Tensor, checkpoint(fn, x, use_reentrant=False))
+                    for fn in self.mask_estimators
+                ],
+                dim=1,
             )
         else:
             mask = torch.stack([fn(x) for fn in self.mask_estimators], dim=1)
@@ -931,7 +927,7 @@ class BSRoformer(Module):
             recon_audio = rearrange(recon_audio, "b 1 s t -> b s t")
 
         # If no target audio provided, directly return reconstructed audio
-        if not exists(target):
+        if target is None:
             return recon_audio
 
         # When model separates multiple sources, check target audio dimensions (4D with first dim matching source count)

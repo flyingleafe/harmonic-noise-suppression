@@ -1,0 +1,79 @@
+<style>
+#flight-tools, #flight-inspector { font: 15px/1.5 system-ui, sans-serif; color: #233646; background: white; }
+#flight-tools { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; padding: .55rem 1rem; border-bottom: 1px solid #ccd5da; }
+#flight-tools select, #flight-inspector select { max-width: 100%; font: inherit; }
+#flight-inspector { width: min(1040px, 92vw); max-height: 88vh; padding: 1.25rem; border: 1px solid #a6b5bf; border-radius: .55rem; }
+#flight-inspector::backdrop { background: rgb(20 32 40 / 48%); }
+#flight-inspector h2 { font-size: 1.2rem; margin: 0; overflow-wrap: anywhere; }
+#flight-inspector header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+#flight-inspector p { margin: .4rem 0; }
+#flight-inspector button { font: inherit; cursor: pointer; }
+#rotor-chart { width: 100%; height: clamp(280px, 47vh, 500px); }
+</style>
+<div id="flight-tools"><strong>Click a flight dot to see its four rotor speeds.</strong> <label>Or select a flight: <select id="flight-lookup"><option value="">Choose flight…</option></select></label></div>
+<dialog id="flight-inspector" aria-labelledby="flight-heading">
+  <header><h2 id="flight-heading"></h2><form method="dialog"><button autofocus>Close</button></form></header>
+  <p id="flight-source"></p>
+  <label id="part-label" hidden>Recording segment: <select id="flight-part"></select></label>
+  <div id="rotor-chart"></div>
+  <p>Shaded intervals are the cruise windows used for the map. Drag to zoom; double-click to reset.</p>
+</dialog>
+<script id="flight-telemetry" type="application/json">__TELEMETRY__</script>
+<script>
+(() => {
+  const el = id => document.getElementById(id);
+  const map = el('flight-map'), dialog = el('flight-inspector'), chart = el('rotor-chart');
+  const lookup = el('flight-lookup'), part = el('flight-part');
+  const {flights, colors, window_s} = JSON.parse(el('flight-telemetry').textContent);
+  const names = ['Front right', 'Front left', 'Rear left', 'Rear right'];
+  const rigs = new Map(), keys = [];
+  let selected;
+  map.parentElement.before(el('flight-tools'));
+  for (const t of map.data.filter(t => t.showlegend && t.customdata)) {
+    const rig = t.legendgroup, name = t.name.replace(/ \(\d+\)$/, '');
+    rigs.set(rig, name);
+    const group = document.createElement('optgroup'); group.label = name;
+    for (const [flight] of t.customdata) {
+      const index = keys.push([rig, flight]) - 1;
+      group.append(new Option(flight, index));
+    }
+    lookup.append(group);
+  }
+  function drawPart() {
+    const s = selected[Number(part.value)];
+    const raw = atob(s.data), bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+    const values = new Float32Array(bytes.buffer), n = values.length / 4;
+    const traces = names.map((name, i) => ({name, type: 'scatter', mode: 'lines',
+      x0: 0, dx: 1 / s.hz, y: values.subarray(i * n, (i + 1) * n),
+      line: {color: colors[i], width: 1.4}, connectgaps: false,
+      hovertemplate: '%{y:.2f} rev/s<extra>' + name + '</extra>'}));
+    el('flight-source').textContent = `${s.source} · ${((n - 1) / s.hz).toFixed(1)} s · ${s.hz} Hz display grid`;
+    Plotly.react(chart, traces, {template: 'plotly_white', margin: {l: 62, r: 15, t: 40, b: 56},
+      legend: {orientation: 'h', y: 1.02, yanchor: 'bottom'}, hovermode: 'x unified',
+      xaxis: {title: {text: 'Time from segment start (s)'}, autorange: true},
+      yaxis: {title: {text: 'Rotor speed (rev/s)'}, autorange: true},
+      shapes: s.starts.map(x => ({type: 'rect', x0: x, x1: x + window_s, y0: 0, y1: 1,
+        yref: 'paper', fillcolor: '#dce9f3', opacity: .7, line: {width: .5, color: '#879daf'}, layer: 'below'}))
+    }, {displaylogo: false, responsive: true, scrollZoom: true});
+  }
+  function openFlight(rig, flight) {
+    selected = flights[rig][flight];
+    el('flight-heading').textContent = rigs.get(rig) + ' · ' + flight;
+    part.replaceChildren(...selected.map((s, i) => new Option(`${s.id} (${s.starts.length} scored)`, i)));
+    part.selectedIndex = selected.findIndex(s => s.starts.length > 0);
+    el('part-label').hidden = selected.length === 1;
+    dialog.showModal(); drawPart();
+  }
+  part.addEventListener('change', drawPart);
+  lookup.addEventListener('change', () => { if (lookup.value !== '') openFlight(...keys[Number(lookup.value)]); });
+  dialog.addEventListener('close', () => { Plotly.purge(chart); lookup.value = ''; });
+  // The single Blackbird flight sits exactly under its centroid. Exclude
+  // centroids from hit testing in every panel; only recordings are clickable.
+  const centroids = map.data.flatMap((t, i) => t.customdata ? [] : [i]);
+  Plotly.restyle(map, {hoverinfo: 'skip', hovertemplate: null}, centroids);
+  map.on('plotly_click', event => {
+    const p = event.points.find(p => Array.isArray(p.customdata));
+    if (p) openFlight(p.data.legendgroup, p.customdata[0]);
+  });
+})();
+</script>

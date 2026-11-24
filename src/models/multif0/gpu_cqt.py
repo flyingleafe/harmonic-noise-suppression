@@ -30,7 +30,7 @@ def _make_octave_kernel(
     n_bins: int,
     bins_per_octave: int,
     filter_scale: float = 1.0,
-) -> tuple[np.ndarray, int, int]:
+) -> tuple[np.ndarray, int]:
     """Create a frequency-domain CQT kernel for a single octave.
 
     Args:
@@ -43,8 +43,6 @@ def _make_octave_kernel(
     Returns:
         kernel:  (n_bins, n_fft//2+1) complex64 filterbank
         n_fft:   FFT size
-        hop_ratio: ratio between this octave's hop and original hop
-                   (for time alignment)
     """
     result = librosa.filters.constant_q(
         sr=sr,
@@ -99,8 +97,6 @@ class CQTMultiRate(nn.Module):
         self.hop_length = hop_length
         self.log_mag = log_mag
 
-        n_bins_total = n_octaves * bins_per_octave
-
         # Precompute kernels and parameters per octave
         self.octave_kernels_real = []
         self.octave_kernels_imag = []
@@ -112,9 +108,8 @@ class CQTMultiRate(nn.Module):
             # This octave's sample rate
             oct_sr = sr / (2**o)
 
-            # librosa uses the SAME hop_length at each downsampled rate.
-            # At rate sr/2, each hop covers 2× the original time.
-            oct_hop = hop_length
+            # The hop is not scaled per octave: librosa uses the SAME hop_length
+            # at each downsampled rate, so at sr/2 each hop covers 2× the time.
 
             # Frequency range for this octave at the original rate:
             # [fmin * 2^o, fmin * 2^(o+1))
@@ -200,7 +195,6 @@ class CQTMultiRate(nn.Module):
         # ── Octaves 1..n_octaves-1 (downsampled) ──
         for o in range(1, self.n_octaves):
             downsample = 2**o
-            oct_sr = self.octave_sr[o]
 
             # Downsample audio: use linear interpolation to match librosa's
             # effective downsampling.  librosa uses proper low-pass + decimation
@@ -279,16 +273,13 @@ class HCQTMultiRate(nn.Module):
         fmin: float = 32.7,
         n_octaves: int = 6,
         over_sample: int = 5,
-        harmonics: list[int] = None,
+        harmonics: list[int] | None = None,
         hop_length: int = 256,
         filter_scale: float = 1.0,
         log_mag: bool = True,
     ):
         super().__init__()
-        if harmonics is None:
-            harmonics = [1, 2, 3, 4, 5]
-        else:
-            harmonics = list(harmonics)
+        harmonics = [1, 2, 3, 4, 5] if harmonics is None else list(harmonics)
         self.harmonics = harmonics
         bins_per_octave = 12 * over_sample
 

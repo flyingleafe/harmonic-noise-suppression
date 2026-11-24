@@ -301,10 +301,15 @@ class HTDemucs(nn.Module):
                 chout_z = max(chout, chout_z)
                 chout = chout_z
 
-            enc = HEncLayer(chin_z, chout_z, dconv=dconv_mode & 1, context=context_enc, **kw)
+            enc = HEncLayer(chin_z, chout_z, dconv=bool(dconv_mode & 1), context=context_enc, **kw)
             if freq:
                 tenc = HEncLayer(
-                    chin, chout, dconv=dconv_mode & 1, context=context_enc, empty=last_freq, **kwt
+                    chin,
+                    chout,
+                    dconv=bool(dconv_mode & 1),
+                    context=context_enc,
+                    empty=last_freq,
+                    **kwt,
                 )
                 self.tencoder.append(tenc)
 
@@ -319,7 +324,12 @@ class HTDemucs(nn.Module):
                 if self.num_subbands > 1:
                     chin_z *= self.num_subbands
             dec = HDecLayer(
-                chout_z, chin_z, dconv=dconv_mode & 2, last=index == 0, context=context, **kw_dec
+                chout_z,
+                chin_z,
+                dconv=bool(dconv_mode & 2),
+                last=index == 0,
+                context=context,
+                **kw_dec,
             )
             if multi:
                 dec = MultiWrap(dec, multi_freqs)

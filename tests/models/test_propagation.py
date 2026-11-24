@@ -16,7 +16,7 @@ import torch
 
 from losses import smoothness_penalty
 from models.generative.propagation import MicEQ
-from models.registry import build_noise_gen_model
+from models.registry import _CodebookConditionedNoiseGen, build_noise_gen_model
 
 RIGS = ["dregon", "michaels"]
 
@@ -151,7 +151,9 @@ def test_filter_audio_is_the_identity_at_zero_init():
 # composition inside the model
 
 
-def _model(*, knots: int = 16, per_rotor: bool = False, n_mics: int = 4):
+def _model(
+    *, knots: int = 16, per_rotor: bool = False, n_mics: int = 4
+) -> _CodebookConditionedNoiseGen:
     params = {
         "n_harmonics": 12,
         "cond_dim": 8,
@@ -163,7 +165,9 @@ def _model(*, knots: int = 16, per_rotor: bool = False, n_mics: int = 4):
         "per_rotor_deltas": per_rotor,
         "n_rotors": 4,
     }
-    return build_noise_gen_model("positional_harmonic_gen", **params)
+    model = build_noise_gen_model("positional_harmonic_gen", **params)
+    assert isinstance(model, _CodebookConditionedNoiseGen)  # cond_dim > 0 wraps the generator
+    return model
 
 
 def _inputs(b: int = 2, r: int = 4, m: int = 4, t: int = 8000):

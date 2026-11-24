@@ -33,9 +33,15 @@ SR, DUR, HOP = 16000, 8.0, 512
 
 
 def clips(n: int, seed0: int = 1000):
-    pool = StaticCombNoisePool(sample_rate=SR, duration_s=DUR, n_harmonics=100,
-                               n_mics=8, n_rotors=4, rps_kind="full_flight",
-                               flight_reuse=1)
+    pool = StaticCombNoisePool(
+        sample_rate=SR,
+        duration_s=DUR,
+        n_harmonics=100,
+        n_mics=8,
+        n_rotors=4,
+        rps_kind="full_flight",
+        flight_reuse=1,
+    )
     out, s = [], seed0
     while len(out) < n and s < seed0 + 300:
         tf = pool.sample_timeframe(np.random.default_rng(s), DUR)
@@ -46,15 +52,17 @@ def clips(n: int, seed0: int = 1000):
         audio = np.asarray(tf["audio"].data, dtype=np.float64)
         n_fr = rps.shape[1] // HOP
         ft = (np.arange(n_fr) * HOP + HOP / 2) / SR
-        truth = np.stack([np.interp(ft, np.arange(rps.shape[1]) / SR, rps[r])
-                          for r in range(rps.shape[0])])
+        truth = np.stack(
+            [np.interp(ft, np.arange(rps.shape[1]) / SR, rps[r]) for r in range(rps.shape[0])]
+        )
         out.append((audio, truth, ft))
     return out
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--n", type=int, default=5)
     ap.add_argument("--iters", type=int, default=6)
     ap.add_argument("--out", default=None)
@@ -70,24 +78,33 @@ def main() -> int:
             errs, kept = [], []
             for audio, truth, ft in data:
                 try:
-                    est, diag = pi_kalman_refine(audio, truth.copy(), ft, sr=SR,
-                                                 n_iter=args.iters, band_mode="k_scaled",
-                                                 guard_hz=guard, pair_mode=pair_mode)
+                    est, diag = pi_kalman_refine(
+                        audio,
+                        truth.copy(),
+                        ft,
+                        sr=SR,
+                        n_iter=args.iters,
+                        band_mode="k_scaled",
+                        guard_hz=guard,
+                        pair_mode=pair_mode,
+                    )
                 except Exception as exc:
                     print(f"   guard={guard} {pair_mode}: {type(exc).__name__}: {exc}")
                     continue
                 errs.append(float(np.mean(np.abs(np.asarray(est) - truth))))
-                n_m = [v.get("n_meas") for it in diag.get("iters", [])
-                       for v in (it.get("rotors") or [])
-                       if isinstance(v, dict) and v.get("n_meas") is not None]
+                n_m = [
+                    float(v["n_meas"])
+                    for it in diag.get("iters", [])
+                    for v in (it.get("rotors") or [])
+                    if isinstance(v, dict) and v.get("n_meas") is not None
+                ]
                 if n_m:
                     kept.append(float(np.mean(n_m)))
             if not errs:
                 continue
             m = float(np.mean(errs))
             km = float(np.mean(kept)) if kept else float("nan")
-            rows.append({"guard_hz": guard, "pair_mode": pair_mode,
-                         "injected": m, "n_meas": km})
+            rows.append({"guard_hz": guard, "pair_mode": pair_mode, "injected": m, "n_meas": km})
             print(f"{guard:>9.1f} {pair_mode:>10s} {m:>10.4f} {km:>18.0f}")
     if args.out and rows:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)

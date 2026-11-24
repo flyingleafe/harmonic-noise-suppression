@@ -44,6 +44,7 @@ from typing import Any
 
 import numpy as np
 
+from data_processing.noise_model.constants import AMP_RPS_REF
 from experiments.noise_model import gates as GT
 from experiments.noise_model import render as RD
 from experiments.noise_model import spectrum as SP
@@ -471,7 +472,7 @@ def run(
             floor_mean_db=float(fit["params"]["floor"]["floor_mean_db"]),
             sigma_nu=float(fit["params"]["sigma_nu"]),
             lam=float(fit["params"]["lam"]),
-            amp_rps_ref=float(RD.AMP_RPS_REF),
+            amp_rps_ref=float(AMP_RPS_REF),
             n_pool_windows=len(fit.get("supports") or []),
             **_pool_span(fit),
         ),
@@ -521,7 +522,7 @@ def run(
             scored_seconds=float(rsupport.scored_seconds),
             mean_reference_rps=float(reference.mean()),
             per_rotor_mean_rps=[float(v) for v in f0_rotor],
-            speed_norm=[float(v / RD.AMP_RPS_REF) for v in f0_rotor],
+            speed_norm=[float(v / AMP_RPS_REF) for v in f0_rotor],
             demod_rotors=list(demod),
             envelope=envelope_report(fit["params"], f0_rotor),
             arms={},
@@ -576,7 +577,7 @@ def run(
                 )
                 entry["floor_match_shift_db"] = cache["floor_match_shift_db"]
             if spec_arm.kind == "real":
-                speed = float(np.mean(f0_rotor) / RD.AMP_RPS_REF)
+                speed = float(np.mean(f0_rotor) / AMP_RPS_REF)
                 level = float(entry["band_level_db_mic0"])
                 if not anchor:
                     anchor.update(speed=speed, level_db=level)
@@ -626,7 +627,7 @@ def envelope_report(params: dict[str, Any], f0_rotor: np.ndarray) -> dict[str, A
     its square root) and the floor carries
     ``mean_r(speed ** floor_exp) + static_rel``.
     """
-    s = np.asarray(f0_rotor, dtype=np.float64) / float(RD.AMP_RPS_REF)
+    s = np.asarray(f0_rotor, dtype=np.float64) / float(AMP_RPS_REF)
     amp_exp = float(params["profile"]["amp_exp"])
     floor_exp = float(params["floor"]["floor_exp"])
     rel = float(params["floor"]["floor_static_rel"])
@@ -803,7 +804,7 @@ def write_figures(payload: dict[str, Any], figures: dict[str, Any], out: Path) -
         ax.set_title(
             f"FLY124 {regime} {row['support']['key']} — LTAS, mic 0, "
             f"mean {row['mean_reference_rps']:.1f} rev/s "
-            f"(speed {env['speed_mean']:.3f} of the {RD.AMP_RPS_REF:.0f} rev/s reference)\n"
+            f"(speed {env['speed_mean']:.3f} of the {AMP_RPS_REF:.0f} rev/s reference)\n"
             f"fitted envelopes here: comb {env['comb_envelope_db']:+.1f} dB, "
             f"floor {env['floor_envelope_db']:+.1f} dB "
             f"→ comb-to-floor {env['comb_minus_floor_db']:+.1f} dB"

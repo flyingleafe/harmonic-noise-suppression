@@ -182,7 +182,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -1023,6 +1023,7 @@ class FlightStageModel:
                 scale=scale,
             )
         else:
+            assert self.lines is not None  # coherence "none": __init__ stored the frozen lines
             lines = torch.tensordot(scale, self.lines[:, :, frames], dims=1)  # (M, n_c, F)
         # h_m is a pair-EQ change: the lines and the per-rotor floor (both weighed by
         # the pair EQ, in either line path), not the static share or the wind
@@ -1380,8 +1381,14 @@ def measure_start(
     z = BV._ridge_z(floor_shape_chol(par.floor.ctrl_hz), float(par.floor.shape_sd_db), ctrl - mean)
     u_lo, u_hi = PR.floor_coords(par.floor.b0, par.floor.b1)
     # nv3r4's measured per-mic low-band excess, read off the pool's own frames
+    # _wind_centres reads only ``batch.power`` and ``batch.grid.freqs_hz``
     centres = FT._wind_centres(
-        SimpleNamespace(power=torch.as_tensor(pool.power), grid=SimpleNamespace(freqs_hz=f_all))
+        cast(
+            MD.SupportBatch,
+            SimpleNamespace(
+                power=torch.as_tensor(pool.power), grid=SimpleNamespace(freqs_hz=f_all)
+            ),
+        )
     )
     init = dict(
         floor_mean_db=mean,
@@ -1581,7 +1588,7 @@ def fit_stage(
 def priors_record(
     model: FlightStageModel, *, kappa_source: str, wind_rule: str | None = None
 ) -> dict[str, Any]:
-    out = dict(
+    out: dict[str, Any] = dict(
         floor_mean=dict(
             family="Normal",
             centre_db=model.floor_centre,

@@ -32,7 +32,7 @@ Pure numpy/scipy plus :func:`experiments.stochastic_fit.diagnostics.floor_cells`
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from scipy.linalg import sqrtm
@@ -357,7 +357,7 @@ def _mod_spectrum(env: np.ndarray, frame_rate: float) -> np.ndarray:
         nperseg=nper,
         noverlap=nper // 2,
         nfft=max(MOD_NFFT, nper),
-        detrend=False,
+        detrend=False,  # pyright: ignore[reportArgumentType]  # scipy is unannotated: detrend inferred str from its default; False is documented
         axis=1,
     )  # p: (M, Fm, B)
     out = np.full((env.shape[0], env.shape[2], len(MOD_EDGES) - 1), np.nan)
@@ -535,8 +535,10 @@ def _frechet(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
     ridge = FRECHET_RIDGE * np.eye(a.shape[1])
     ca = np.cov(a, rowvar=False) + ridge
     cb = np.cov(b, rowvar=False) + ridge
-    sa = np.real(sqrtm(ca))
-    cross = np.real(sqrtm(sa @ cb @ sa))
+    # scipy is unannotated and sqrtm's deprecated disp=False tuple return leaks into
+    # the inferred type; with disp at its default it returns the matrix root.
+    sa = np.real(cast(np.ndarray, sqrtm(ca)))
+    cross = np.real(cast(np.ndarray, sqrtm(sa @ cb @ sa)))
     mean_term = float(np.sum((a.mean(axis=0) - b.mean(axis=0)) ** 2))
     return mean_term, float(np.trace(ca + cb - 2.0 * cross))
 

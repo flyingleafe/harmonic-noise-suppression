@@ -102,6 +102,6 @@ def test_additivity_reads_zero_on_incoherent_sums():
     rng = np.random.default_rng(4)
     sr = 16000
     single = {r: rng.standard_normal((4, sr)) * (0.5 + r) for r in range(4)}
-    combined = sum(single.values())
+    combined = sum(single.values(), np.zeros((4, sr)))
     add = power.additivity(single, combined, sr, [(500, 1000), (2000, 4000)])
     assert np.abs(add["excess_db"]).max() < 1.0
