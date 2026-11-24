@@ -12,7 +12,7 @@ import pytest
 import tdseries as td
 
 from plots.dwym import DwymResult
-from plots.explore import datasets, grid, meta_table, pick
+from plots.explore import datasets, grid, meta_table, noise_datasets, pick
 
 SR = 8000
 DUR_S = 0.4
@@ -185,3 +185,11 @@ def test_datasets_reads_the_lock_offline():
     assert {"name", "version"} <= set(table.columns)
     assert "DREGON-frames" in set(table["name"])
     assert all(len(v) == 12 for v in table["version"])
+
+
+def test_motor_recordings_are_discoverable_as_pinned_raw_data():
+    name = "new_motor_data"
+    pin = datasets().set_index("name").at[name, "version"]
+    row = noise_datasets(sizes=False).set_index("name").loc[name]
+    assert row["kind"] == "raw"
+    assert row["pinned"] == pin
