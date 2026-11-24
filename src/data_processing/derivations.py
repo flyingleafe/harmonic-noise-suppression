@@ -77,6 +77,8 @@ import numpy as np
 import soundfile as sf
 import tdseries as td
 
+from data_processing.sources.new_motor_data import AUDIO_CLOCK
+
 Sample = tuple[str, dict[str, bytes]]
 
 #: Resolved parent dataset pins (from ``dload.lock``). Frozen into the specs so
@@ -91,6 +93,7 @@ PARENTS = {
     "DREGON-frames": "dload:DREGON-frames@261b09971c8ace16e3434f4a89406c6043403f8ac89a3f1202566cb8c712ba89",
     "michaels-frames": "dload:michaels-frames@8e9d149560dd5d5fa8aaa87e7ea537d7e4d96e829e874dab7d9c92621cca6e46",
     "michaels-test-frames": "dload:michaels-test-frames@353cc523d6091e1eed80a71e808e177ac037977a9031d9a0e030071d9f338991",
+    "new_motor_data": "dload:new_motor_data@6e2a877374568718050f4df7597c460cddd033e631ba1bfe27ac2e8331cb09a3",
     "AVQ": "dload:AVQ@a37840cace1ef87cabcb6c1a3432c67ca942db12611bcca8bd9a782c88622caf",
     "AVQ-egonoise": "dload:AVQ-egonoise@b43b374b007a0d5c9575dd2feacd31a05097d0c436629819b936273f17cf7703",
     "DREGON-LM-V4-michaels-valid-full": "dload:DREGON-LM-V4-michaels-valid-full@9604f3ffc2c935e2ba2be52bd96c602d02a6999f1d683ee89fa1b0e28fafc4a9",
@@ -2074,6 +2077,21 @@ SPECS: dict[str, dict[str, Any]] = {
             "source": "DREGON",
             "raw": {"kind": "dload", "uri": PARENTS["DREGON"]},
             "refined_labels": _refined_label_identity("DREGON"),
+        },
+    },
+    "new_motor_data-frames": {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": "November M100 stereo recordings and native rotor speeds on the WAV clock; "
+        "every DAT group and the exact original DAT bytes are retained.",
+        "gen": {
+            "recipe_version": 1,
+            "source": "new_motor_data",
+            "raw": {"kind": "dload", "uri": PARENTS["new_motor_data"]},
+            "audio_clock": {
+                flight: {"offset_s": offset, "tick_hz": hz}
+                for flight, (offset, hz) in AUDIO_CLOCK.items()
+            },
         },
     },
     "michaels-test-frames": {
