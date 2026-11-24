@@ -334,7 +334,9 @@ def residual_energy(ctx: Context, a: float, f: float, gain: float) -> tuple[floa
     top = float(r.max()) * ctx.model.k_max
     if top > ctx.cfg.f_max:
         raise ValueError(f"order {top:.0f} Hz above the analysis band edge {ctx.cfg.f_max:.0f} Hz")
-    env = vk_envelopes(ctx.x, r, ctx.cfg, ridge=np.full(4 * (ctx.cfg.k_max - ctx.cfg.k_min + 1), RIDGE))
+    env = vk_envelopes(
+        ctx.x, r, ctx.cfg, ridge=np.full(4 * (ctx.cfg.k_max - ctx.cfg.k_min + 1), RIDGE)
+    )
     e = ctx.x - vk_reconstruct(env, n_samples=ctx.x.shape[-1])
     return float(np.sum(e[:, ctx.mask] ** 2)), env.bw_track
 
@@ -415,9 +417,7 @@ def _worker(unit: Unit) -> dict[str, Any]:
         return num
 
     if p["kind"] == "maps":
-        out["maps"] = {
-            label: {"A": a, "f": f, "num": energy(a, f)} for label, a, f in p["maps"]
-        }
+        out["maps"] = {label: {"A": a, "f": f, "num": energy(a, f)} for label, a, f in p["maps"]}
     else:
         hw, step = stage.halfwidth_s, stage.step_s
         c = float(p["centre_offset"])
@@ -428,8 +428,10 @@ def _worker(unit: Unit) -> dict[str, Any]:
             i = min(range(len(lags)), key=lambda k: nums[lags[k]])
             if 0 < i < len(lags) - 1:
                 break
-            new = grid(lags[0] - hw, lags[0] - step, step) if i == 0 else grid(
-                lags[-1] + step, lags[-1] + hw, step
+            new = (
+                grid(lags[0] - hw, lags[0] - step, step)
+                if i == 0
+                else grid(lags[-1] + step, lags[-1] + hw, step)
             )
             nums |= {float(o): energy(float(o), NOMINAL) for o in new}
             extended += 1
@@ -462,7 +464,9 @@ def run_phase(units: list[Unit], out_dir: Path, args: argparse.Namespace) -> dic
         else:
             missing.append(u.uid)
     if missing:
-        raise SystemExit(f"{len(missing)} unit(s) failed in {out_dir}: see raw/*.err ({missing[:3]})")
+        raise SystemExit(
+            f"{len(missing)} unit(s) failed in {out_dir}: see raw/*.err ({missing[:3]})"
+        )
     return rows
 
 
@@ -619,13 +623,17 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
 
     # Nuisance gain: fixed before any VK lag is looked at (profile mode: fit only).
     if args.gain == "comb":
-        gain_info = comb_prior_gain(root, rid, seed, [w["centre"] for w in wins if w["role"] == "fit"])
+        gain_info = comb_prior_gain(
+            root, rid, seed, [w["centre"] for w in wins if w["role"] == "fit"]
+        )
     elif args.gain == "profile":
         gain_info = {"gain": 1.0, "source": "VK profile on usable fit windows"}
     else:
         gain_info = {"gain": float(args.gain), "source": "fixed on the command line"}
     gain_grid = [round(float(g), 6) for g in (GAIN[::10] if args.smoke else GAIN)]
-    g_lo, g_hi = (min(gain_grid), max(gain_grid)) if args.gain == "profile" else (gain_info["gain"],) * 2
+    g_lo, g_hi = (
+        (min(gain_grid), max(gain_grid)) if args.gain == "profile" else (gain_info["gain"],) * 2
+    )
 
     for w in wins:
         w["band"] = analysis_band(model, ticks, rps, seed, w["centre"], (g_lo, g_hi))
@@ -640,7 +648,11 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
 
     # Coarse: around the independent transition seed, never the comb map.
     g0 = gain_info["gain"]
-    units = [Unit(_uid("coarse", p), p) for w in wins for p in [params(w, coarse, g0, kind="scan", centre_offset=seed)]]
+    units = [
+        Unit(_uid("coarse", p), p)
+        for w in wins
+        for p in [params(w, coarse, g0, kind="scan", centre_offset=seed)]
+    ]
     rows = run_phase(units, out_dir / "coarse", args)
     for w, u in zip(wins, units, strict=True):
         w["coarse"] = rows[u.uid]
@@ -658,7 +670,9 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
         per_gain, per_window = [], {w["name"]: [] for w in usable_fit}
         for g in gain_grid:
             sel = [c for c in cells if c["gain"] == g]
-            per_gain.append(float(np.sqrt(sum(min(c["nums"]) for c in sel) / sum(c["den"] for c in sel))))
+            per_gain.append(
+                float(np.sqrt(sum(min(c["nums"]) for c in sel) / sum(c["den"] for c in sel)))
+            )
             for c in sel:
                 per_window[c["window"]].append(min(c["ratios"]))
         gm, gy, gedge = parab_min(gain_grid, per_gain)
@@ -688,7 +702,9 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
         w["usable"] = bool(w["coarse"]["curve"]["usable"] and w["fine"]["curve"]["usable"])
         w["vk_offset"] = w["fine"]["curve"]["best"]
         w["native_s"] = w["centre"] - w["vk_offset"]
-        w["outside_mask_range"] = not (w["mask_offsets"][0] <= w["vk_offset"] <= w["mask_offsets"][1])
+        w["outside_mask_range"] = not (
+            w["mask_offsets"][0] <= w["vk_offset"] <= w["mask_offsets"][1]
+        )
 
     fits = [w for w in wins if w["role"] == "fit" and w["usable"]]
     held = [w for w in wins if w["role"] == "heldout"]
@@ -707,12 +723,18 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
     line = None
     vk_map = None
     if len(fits) >= 2:
-        line = fit_line(np.array([w["native_s"] for w in fits]), np.array([w["vk_offset"] for w in fits]))
+        line = fit_line(
+            np.array([w["native_s"] for w in fits]), np.array([w["vk_offset"] for w in fits])
+        )
         vk_map = (line["A_s"], line["rate_hz"])
 
     # Maps: actual residual of the comb map and the VK candidate on every window.
     maps = [["comb", comb_a, comb_f]] + ([["vk", *vk_map]] if vk_map else [])
-    units = [Unit(_uid("maps", p), p) for w in wins for p in [params(w, fine, gain, kind="maps", maps=maps)]]
+    units = [
+        Unit(_uid("maps", p), p)
+        for w in wins
+        for p in [params(w, fine, gain, kind="maps", maps=maps)]
+    ]
     rows = run_phase(units, out_dir / "maps", args)
     for w, u in zip(wins, units, strict=True):
         m = rows[u.uid]
@@ -720,7 +742,7 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
         w["map_num"] = {k: v["num"] for k, v in m["maps"].items()}
         w["den"] = m["den"]
         w["comb_lag_resid_ms"] = 1e3 * (w["vk_offset"] - w["comb_offset"])
-        if vk_map:
+        if vk_map is not None and line is not None:
             w["vk_map_offset"] = local_offset(*vk_map, w["centre"])
             w["vk_lag_resid_ms"] = 1e3 * (w["vk_offset"] - w["vk_map_offset"])
             w["map_diff_ms"] = 1e3 * (w["vk_map_offset"] - w["comb_offset"])
@@ -775,7 +797,11 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
         max_map_diff_ms=evidence["max_heldout_map_diff_ms"],
         scatter_ms=scatter,
     )
-    sel = vk_map if decision["selected_map"] == "vk" else (comb_a, comb_f)
+    if decision["selected_map"] == "vk":
+        assert vk_map is not None
+        sel = vk_map
+    else:
+        sel = (comb_a, comb_f)
     decision["selected"] = {"A_s": sel[0], "rate_hz": sel[1]}
 
     keep = ("name", "role", "position", "centre", "band", "mask_offsets", "usable", "comb_offset",
@@ -818,7 +844,9 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
         "gain": gain_info,
         "comb_map": {"A_s": comb_a, "rate_hz": comb_f, "source": "published 2026-11-24, frozen"},
         "vk_fit": line,
-        "vk_map": None if not vk_map else {
+        "vk_map": None
+        if not vk_map
+        else {
             "A_s": vk_map[0],
             "rate_hz": vk_map[1],
             "A_minus_comb_ms": 1e3 * (vk_map[0] - comb_a),
@@ -826,7 +854,9 @@ def run_recording(rid: str, args: argparse.Namespace) -> dict[str, Any]:
         },
         "diagnostic_all_window_fit": fit_line(
             np.array([w["native_s"] for w in all_ok]), np.array([w["vk_offset"] for w in all_ok])
-        ) if len(all_ok) >= 2 else None,
+        )
+        if len(all_ok) >= 2
+        else None,
         "evidence": evidence,
         "decision": decision,
         "windows": windows_out,
@@ -861,11 +891,17 @@ def write_summary(out: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--recording", nargs="+", choices=sorted(RECORDINGS), default=sorted(RECORDINGS))
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--recording", nargs="+", choices=sorted(RECORDINGS), default=sorted(RECORDINGS)
+    )
     ap.add_argument("--root", help="raw new_motor_data tree (default: the pinned dload dataset)")
     ap.add_argument("--out", default="results/new_motor_data_alignment/vk_clock")
-    ap.add_argument("--gain", default="comb", help="'comb' (prior), 'profile' (VK, fit only) or a number")
+    ap.add_argument(
+        "--gain", default="comb", help="'comb' (prior), 'profile' (VK, fit only) or a number"
+    )
     ap.add_argument("--smoke", action="store_true", help="2 fit + 1 held-out window, coarse grids")
     add_gridrun_args(ap, jobs=1)
     args = ap.parse_args(argv)
