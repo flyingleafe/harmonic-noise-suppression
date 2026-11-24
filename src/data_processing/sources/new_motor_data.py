@@ -12,7 +12,7 @@ from data_processing.sources.motor_dat import DatTelemetry, read_motor_dat
 
 # WAV time at native tick zero (s), native ticks per WAV second. The three
 # recording sessions do not share an offset. See docs/data-catalog.md.
-_AUDIO_CLOCK = {
+AUDIO_CLOCK = {
     "FLY013": (29.091134, 84_000_904.0),
     "FLY018": (-53.894454, 84_000_510.0),
     "FLY022": (-273.865007, 84_001_237.0),
@@ -26,7 +26,7 @@ def audio_seconds(flight: str, ticks: ArrayLike) -> NDArray[np.float64]:
     For CSV rows unwrap the full ``Clock:Tick#`` column with ``motor_dat.datcon_ticks``
     first; the resulting stamp dates the exported row, not its held sensors.
     """
-    offset, hz = _AUDIO_CLOCK[flight]
+    offset, hz = AUDIO_CLOCK[flight]
     return offset + np.asarray(ticks, dtype=np.float64) / hz
 
 
@@ -37,6 +37,6 @@ def read_aligned_motor(path: str | Path) -> DatTelemetry:
     The optional DatCon table is aligned on its export row clock instead.
     """
     path = Path(path)
-    if path.stem not in _AUDIO_CLOCK:
+    if path.stem not in AUDIO_CLOCK:
         raise KeyError(f"no WAV clock calibration for {path.stem!r}")
     return read_motor_dat(path, audio_clock=partial(audio_seconds, path.stem))

@@ -47,6 +47,7 @@ from data_processing.sources import (
     mimii,
     nanobench,
     neurobem,
+    november_frames,
     pitcn,
     spcup19,
     vid,
@@ -314,6 +315,8 @@ REGISTRY: dict[str, SourceDataset] = {
                 "DAT logs, DatCon CSV exports and stereo ZOOM audio.",
             },
             raw_dataset="new_motor_data",
+            builder=november_frames.build,
+            frames_dataset="new_motor_data-frames",
         ),
         SourceDataset(
             name="recording_with_motor_speed",

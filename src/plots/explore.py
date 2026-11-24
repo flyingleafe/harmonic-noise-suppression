@@ -394,6 +394,8 @@ NOISE_DATASETS: dict[str, str] = {
     "(motors_command + motors_measured), rps_refined",
     "michaels-frames": "Michael's DJI M100 flights FLY124/FLY125: 8 mics, calibrated rps",
     "michaels-test-frames": "HELD-OUT TEST flights FLY103/FLY108 (mono, 48 kHz): look, do not train",
+    "new_motor_data-frames": "November M100 sessions FLY013/018/022: 48 kHz stereo, "
+    "audio-aligned native rotor speeds, complete telemetry and original DAT bytes",
     "SPCUP19-frames": "IEEE SP Cup 2019 ego-noise: 10 team packages (1/3/8/16 ch), every recording "
     "tagged from the team reports (condition, active rotors, sources) with mic_pos/rotor_pos",
     "AVQ-egonoise": "AVQ quadrotor: the 5 pure rotor ego-noise sequences, channel 0, 16 kHz mono "
