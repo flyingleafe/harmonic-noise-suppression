@@ -1038,3 +1038,37 @@ No commit, push or wrap-up-submodule change was made in this extension.
 Artifact hashes and complete verification:
 `neural_extension/final_verification.json`.
 
+## November stereo recordings: within-recording acoustic listening test
+
+Separate from the manuscript benchmark. Fit the v4 flight acoustic model
+afresh to FLY018 and FLY022 in airborne cruise and to FLY013 on the
+bare-motor bench. Use `new_motor_data-frames@e766b6a9306b`, keep its selected
+WAV clock and measured rotor rates, and fit both microphone channels. No
+FLY125 checkpoint or eight-mic geometry is transferred. A new spectral
+response is measured for the stereo pair; the unknown per-rotor distance
+terms are neutral. FLY013 uses a generic shaft-order profile with additional
+lines at orders 84 and 98, not a physical blade-passing interpretation.
+
+Each fit uses eight disjoint four-second excerpts. For the flights these
+start at 80, 180, …, 780 s; for the bench, four lower-speed and four
+higher-speed windows come from later runs. Two eight-second excerpts per
+recording are reserved before fitting. The originals and stochastic draws
+share the same 16 kHz output band and the same held-out speed trajectories;
+native 48 kHz recordings are provided separately. Comparison levels are
+unadjusted, with a shared, stated playback gain. This tests a recording's
+fitted sound, not generalization to a different airframe or array.
+
+**Results.** On the two held-out excerpts, RMS one-third-octave level
+differences (44.7 Hz–7.08 kHz, both microphones) were 3.08/5.12 dB for
+FLY013 (high/low running), 1.29/1.74 dB for FLY018, and 2.23/4.62 dB for
+FLY022. In the low-speed bench excerpt, overall recorded and generated levels
+are close, but the approximately 250 Hz band is 9.6 dB weak and the 5 kHz
+band 11.0 dB strong (averaged channel differences). None of the fits met the
+full convergence criterion: FLY013 reached its time limit; FLY018/022 reached
+the 20-pass restart limit. These are six draws, not a perceptual rating.
+
+[Listening page](../../writing/reports/2026-11-25_november-cruise-generator/index.html)
+and [Quarto source](../../writing/reports/2026-11-25_november-cruise-generator/index.qmd).
+Per-recording payloads and raw digital-level WAVs: `results/november_cruise_generator/`.
+University Slurm jobs: FLY013 `37451859`, FLY018 `37451860`, FLY022 `37451861`.
+
