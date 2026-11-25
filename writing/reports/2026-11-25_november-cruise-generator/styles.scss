@@ -1,0 +1,132 @@
+/*-- scss:defaults --*/
+$font-family-sans-serif: system-ui, -apple-system, "Segoe UI", sans-serif;
+$font-size-base: 1.02rem;
+$line-height-base: 1.55;
+$primary: #1971c2;
+
+/*-- scss:rules --*/
+#title-block-header .title {
+  font-weight: 750;
+}
+h2 {
+  margin-top: 2.4rem;
+}
+.panel-tabset .nav-link {
+  font-weight: 600;
+}
+table {
+  font-variant-numeric: tabular-nums;
+}
+main table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+main details, main .tab-pane {
+  min-width: 0;
+}
+main details td {
+  overflow-wrap: anywhere;
+}
+.quarto-figure img,
+p > img {
+  max-width: 100%;
+  height: auto;
+}
+
+.ab-player {
+  border: 1px solid var(--bs-border-color);
+  border-inline-start: 4px solid $primary;
+  border-radius: 0.6rem;
+  padding: 0.8rem 1rem;
+  margin-block: 1rem 0.6rem;
+  background: rgba(25, 113, 194, 0.035);
+}
+.ab-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1rem;
+  align-items: baseline;
+  font-size: 0.95rem;
+}
+.ab-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: center;
+  margin-block: 0.7rem;
+}
+.ab-controls[hidden] {
+  display: none;
+}
+.ab-controls button {
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  font-weight: 600;
+}
+.ab-play {
+  min-width: 6.5rem;
+}
+.ab-switch {
+  display: inline-flex;
+}
+.ab-switch button:first-child {
+  border-radius: 0.4rem 0 0 0.4rem;
+}
+.ab-switch button:last-child {
+  border-radius: 0 0.4rem 0.4rem 0;
+  margin-inline-start: -1px;
+}
+.ab-switch button[aria-pressed="true"] {
+  background: $primary;
+  border-color: $primary;
+  color: #fff;
+}
+.ab-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--bs-secondary-color);
+}
+.ab-tracks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.ab-track {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.45rem;
+  border: 1px solid transparent;
+}
+.ab-track.is-active {
+  border-color: $primary;
+  background: rgba(25, 113, 194, 0.07);
+}
+.ab-track figcaption {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.ab-player audio,
+.native-ref audio {
+  width: 100%;
+}
+.native-ref {
+  border: 1px dashed #8a94a6;
+  border-radius: 0.6rem;
+  padding: 0.6rem 1rem;
+  margin-block: 0.6rem 1rem;
+  font-size: 0.92rem;
+}
+.native-ref p {
+  margin-bottom: 0.4rem;
+}
+.native-figure {
+  opacity: 0.95;
+}
+@media (max-width: 640px) {
+  .ab-tracks {
+    grid-template-columns: 1fr;
+  }
+}

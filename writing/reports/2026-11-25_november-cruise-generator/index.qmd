@@ -1,0 +1,67 @@
+---
+title: "Rotor noise: recorded and generated"
+subtitle: "Three November recordings · Six held-out stereo comparisons"
+date: 2026-11-25
+lang: en
+format:
+  html:
+    theme: [cosmo, styles.scss]
+    html-math-method: mathml
+    embed-resources: true
+    toc: true
+    toc-depth: 2
+    anchor-sections: true
+execute:
+  echo: false
+---
+
+Each pair covers the **same eight seconds**: A is recorded, and B is synthesized from the four measured motor speeds. The generator was fitted to **32 other seconds of the same recording**; these are within-recording tests, not transfer to a new rig. FLY013 ran on the ground without propellers. FLY018 and FLY022 were airborne.
+
+## Listen and look {#recordings}
+
+Select a recording, press **Play**, then switch between **A · Recorded** and **B · Generated** without losing your place. Both use the same playback gain. Listen for the spacing and movement of the tones, the broadband hiss, and the balance between them—not a sample-by-sample waveform match. The spectrograms share a colour scale.
+
+The matched comparison is at **16 kHz**. A separate **48 kHz original** lets you hear what lies outside the generator's band. No generated draw was selected by ear, and the metrics use unscaled waveforms.
+
+{{< include assets/flights.md >}}
+
+## At a glance
+
+{{< include assets/summary.md >}}
+
+: Level error and band distance are defined [below](#numbers). Each cell gives example 1 · example 2. Optimizer status is copied from the fit report. {.striped .hover}
+
+![Calibration (blue) and held-out (orange) windows on each recording's own clock. The label gives the smallest gap between any calibration window and a held-out example.](assets/fig/timeline.png){fig-alt="Timeline of fit windows and held-out examples for each recording."}
+
+
+## How the numbers and pictures are made {#numbers}
+
+All quantities use the unscaled held-out WAV files at the model output rate. Let $r_c[n]$ be the recorded and $g_c[n]$ the generated sample of channel $c \in \{1,2\}$; full scale is 1.0.
+
+**RMS level.** $L_c = 10\log_{10}\big(\tfrac1N\sum_n x_c[n]^2\big)$ dB for $x \in \{r, g\}$. 0 dB is RMS 1.0. This is a digital level, not a sound-pressure level.
+
+**Welch PSD.** $P_c(f)$ is the one-sided power spectral density: Hann window of 0.512 s (8192 samples at 16 kHz), 50 % overlap, mean removed per segment, segments averaged.
+
+**One-third-octave bands.** Band $b$ has the centre $f_b = 1000 \cdot 10^{k/10}$ Hz, $k = -13, -12, \dots$, and edges $f_b \cdot 10^{\pm 1/20}$. The first band is centred at 50 Hz. We keep every band whose upper edge is at most $0.49\,f_s$; at 16 kHz that is the 6.3 kHz band, so the scored range is 44.7 Hz – 7.08 kHz. Band power is $P_{c,b} = \sum_{f_k \in b} P_c(f_k)\,\Delta f$.
+
+**Band difference.** $D_{c,b} = 10\log_{10}\big(P^{g}_{c,b} / P^{r}_{c,b}\big)$ dB. Positive means the model is louder in that band.
+
+**Level error** (per channel) $= 10\log_{10}\big(\sum_b P^{g}_{c,b} / \sum_b P^{r}_{c,b}\big)$ dB: the broadband level difference over the scored band range.
+
+**Band distance** $= \sqrt{\tfrac{1}{2B}\sum_{c,b} D_{c,b}^2}$ dB over both channels and all $B$ bands. It splits exactly into a **band offset** $\bar D = \tfrac{1}{2B}\sum_{c,b} D_{c,b}$ and a **shape distance** $\sqrt{\tfrac{1}{2B}\sum_{c,b} (D_{c,b} - \bar D)^2}$: band distance² = offset² + shape distance². The offset says "too loud or too quiet overall"; the shape distance says "wrong spectral balance". Lower is better for both distances. These are descriptive numbers for two examples, not a statistical test.
+
+**Spectrograms.** Hann frames of 0.128 s (2048 samples at 16 kHz), hop 1/8 frame, power-spectrum scaling, averaged over the two channels, in dB re full scale². Both examples and both sources for a recording share a 70 dB colour range, with the upper limit 3 dB above the largest panel-wise 99.5th percentile (rounded up). The native-rate panel uses the same frame duration and colour scale. The lower strip shows short-time level.
+
+## Model and fit
+
+The generator is the repository's v4 regime noise model (`experiments.noise_model.flight_v4`), rendered to audio by `data_processing.noise_model.render`. It is fitted afresh to each recording. The renderer draws random phases from the fitted model and uses the measured rotor speeds of the held-out window; it applies no level normalisation. Each recording's tab lists the optimizer, objective, configuration and convergence exactly as the fit reported them, together with the fit's own limitations.
+
+The model output and the matched recording share one sample rate. The scored band range stops below that rate's Nyquist frequency. Content above it — for example high motor orders of FLY013 — appears only in the native-rate player and figure.
+
+## Provenance
+
+The page embeds only audio excerpts, figures and summary numbers. It contains no rotor-speed traces or other raw sensor data. Host paths in the fit metadata are reduced to file names.
+
+{{< include assets/provenance.md >}}
+
+<script src="ab.js"></script>
