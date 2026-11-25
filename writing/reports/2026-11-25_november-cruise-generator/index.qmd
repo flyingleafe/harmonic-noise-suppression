@@ -21,6 +21,8 @@ Each pair covers the **same eight seconds**: A is recorded, and B is synthesized
 
 Select a recording, press **Play**, then switch between **A · Recorded** and **B · Generated** without losing your place. Both use the same playback gain. Listen for the spacing and movement of the tones, the broadband hiss, and the balance between them—not a sample-by-sample waveform match. The spectrograms share a colour scale.
 
+Use **Spectrogram frequency axis** above any comparison to switch all spectrograms between **Logarithmic** (equal space per octave) and **Linear** (equal space per Hz). The time axis, dB scale and audio stay unchanged.
+
 The matched comparison is at **16 kHz**. A separate **48 kHz original** lets you hear what lies outside the generator's band. No generated draw was selected by ear, and the metrics use unscaled waveforms.
 
 {{< include assets/flights.md >}}

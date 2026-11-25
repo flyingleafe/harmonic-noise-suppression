@@ -1,5 +1,16 @@
 (() => {
   "use strict";
+  const scales = document.querySelectorAll("[data-freq-select]");
+  const setScale = (value) => {
+    document.documentElement.dataset.freqScale = value;
+    scales.forEach((select) => { select.value = value; });
+  };
+  scales.forEach((select) => {
+    select.addEventListener("change", () => setScale(select.value));
+    select.closest("label").hidden = false;
+  });
+  if (scales.length) setScale(scales[0].value);
+
   const all = [...document.querySelectorAll("audio")];
   // Only one player sounds at a time across the page.
   document.addEventListener("play", (event) => {

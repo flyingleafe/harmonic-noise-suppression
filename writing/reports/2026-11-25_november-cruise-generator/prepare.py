@@ -327,6 +327,15 @@ def write_playback(path: Path, x: np.ndarray, sr: int, gain_db: float) -> None:
     sf.write(path, y.T, sr, subtype="FLOAT")
 
 
+def _save_spectrogram_views(fig, freq_axis, out: Path) -> None:
+    # Reuse the same plotted mesh and colour limits; only its y transform changes.
+    for mode, path in (("log", out), ("linear", out.with_stem(out.stem + "-linear"))):
+        freq_axis.set_yscale(mode)
+        freq_axis.set_ylabel(f"Frequency (Hz, {mode})")
+        fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def spectrogram_figure(
     fly: str, i: int, pair: dict, sr: int, scale: tuple[float, float], out: Path
 ) -> dict:
@@ -343,11 +352,9 @@ def spectrogram_figure(
             t, f[keep], s[keep], cmap="magma", vmin=vmin, vmax=vmax, shading="auto", rasterized=True
         )
         saturated[key] = float(np.mean(s[keep] > vmax))
-        ax.set_yscale("log")
         ax.set_ylim(F_MIN_PLOT, sr / 2)
         ax.set_title(f"{title} · {sr / 1000:g} kHz, mean of both channels", fontsize=11, loc="left")
         ax.set_xlabel("Time in example (s)")
-    axes[0].set_ylabel("Frequency (Hz)")
     plt.setp(axes[1].get_yticklabels(), visible=False)
     bar = fig.colorbar(mesh, ax=axes, pad=0.01, fraction=0.03)
     bar.set_label("Power spectrum (dB re full scale²)")
@@ -361,8 +368,7 @@ def spectrogram_figure(
     lev.grid(alpha=0.3)
     lev.legend(loc="lower right", ncols=2, fontsize=9, frameon=False)
     fig.suptitle(f"{fly} · held-out example {i}", fontsize=13, x=0.01, ha="left")
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
+    _save_spectrogram_views(fig, axes[0], out)  # both panels share y
     return saturated
 
 
@@ -393,18 +399,15 @@ def native_figure(
         va="bottom",
         fontsize=9,
     )
-    ax.set_yscale("log")
     ax.set_ylim(F_MIN_PLOT, nat["sr"] / 2)
     ax.set_xlabel("Time in example (s)")
-    ax.set_ylabel("Frequency (Hz)")
     ax.set_title(
         f"{fly} · example {i} · recorded at native {nat['sr'] / 1000:g} kHz (outside the comparison)",
         fontsize=11,
         loc="left",
     )
     fig.colorbar(mesh, ax=ax, pad=0.01, fraction=0.03).set_label("dB re full scale²")
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
+    _save_spectrogram_views(fig, ax, out)
 
 
 def psd_figure(flight: dict, metrics: dict, out: Path) -> None:
@@ -599,6 +602,24 @@ def heldout_window(selection: dict | None, start: float) -> dict | None:
     return None
 
 
+def _spectrogram_markup(stem: str, caption: str) -> str:
+    images = [
+        f'<img data-freq-view="{mode}" src="assets/fig/{stem}{suffix}.png" '
+        f'alt="{escape(caption)} Frequency axis: {mode}.">'
+        for mode, suffix in (("log", ""), ("linear", "-linear"))
+    ]
+    return "\n".join(
+        [
+            "```{=html}",
+            '<figure class="spectrogram-views">',
+            *images,
+            f"<figcaption>{escape(caption)}</figcaption>",
+            "</figure>",
+            "```",
+        ]
+    )
+
+
 def flight_markdown(fl: dict, metrics: dict, gains: dict, saturation: dict) -> str:
     fly, rep, sr = fl["fly"], fl["report"], fl["sr"]
     label, condition = RECORDINGS[fly]
@@ -655,12 +676,20 @@ def flight_markdown(fl: dict, metrics: dict, gains: dict, saturation: dict) -> s
                 "",
             ]
         lines += [player_html(fly, i, pair, gains[i], sr), ""]
-        lines.append(
-            f"![{fly} example {i}: recorded (left) and generated (right) spectrograms on one colour scale, "
-            f'with short-time level below.](assets/fig/{fly}_{i}_spectrogram.png){{fig-alt="Recorded and generated '
-            f'spectrograms of {fly} held-out example {i}, log frequency axis, shared colour scale."}}'
-        )
-        lines.append("")
+        lines += [
+            "```{=html}",
+            '<label class="freq-control" hidden>Spectrogram frequency axis '
+            '<select data-freq-select><option value="log" selected>Logarithmic</option>'
+            '<option value="linear">Linear</option></select></label>',
+            "```",
+            "",
+            _spectrogram_markup(
+                f"{fly}_{i}_spectrogram",
+                f"{fly} example {i}: recorded (left) and generated (right) on one colour scale, "
+                "with short-time level below.",
+            ),
+            "",
+        ]
         sat = saturation[i]
         if max(sat.values()) > 0.01:
             lines += [
@@ -670,11 +699,11 @@ def flight_markdown(fl: dict, metrics: dict, gains: dict, saturation: dict) -> s
             ]
         if pair["native"]:
             lines += [
-                "::: {.native-figure}",
-                f"![Native-rate recording of {fly} example {i}, outside the comparison.]"
-                f'(assets/fig/{fly}_{i}_native.png){{fig-alt="Spectrogram of the native-rate recording, dashed line '
-                'at the model output Nyquist frequency."}',
-                ":::",
+                _spectrogram_markup(
+                    f"{fly}_{i}_native",
+                    f"{fly} example {i}: native-rate recording. The dashed line is the "
+                    "model output Nyquist frequency.",
+                ),
                 "",
             ]
     lines += ["#### Held-out levels and spectral errors", ""] + details
