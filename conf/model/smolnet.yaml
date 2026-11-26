@@ -1,0 +1,31 @@
+# SMoLnet-TCS — Tan, Nguyen, Khong, "An Efficient Dilated Convolutional Neural
+# Network for UAV Noise Reduction at Low Input SNR", APSIPA ASC 2019
+# (doi:10.1109/APSIPAASC47483.2019.9023324). No public code; re-implemented
+# from the paper in src/models/smolnet_se.py (see its docstring).
+# Direct complex spectral mapping: 10 frequency-dilated (3,1) conv layers
+# (dilation 1..512) + 3 (3,3) layers, 64 ch, BatchNorm + ReLU, 1x1 output conv
+# to (Re, Im). 224,194 params (paper Table V: 224k).
+# STFT: 16 kHz, n_fft = win = 2048, hop 1024 (50 %), sine window, F = 1025.
+# The spectrogram is processed in independent 9-frame (0.64 s) blocks as in the
+# paper; context_frames: null runs it fully convolutionally instead.
+# norm: layer (+ window: hamming) gives the 249,180-param baseline listed in
+# the SMoLnet-T paper (2024 Table I: 249k). Counts measured on built models.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.smolnet_se.build_smolnet
+params:
+  n_fft: 2048
+  hop_length: 1024
+  window: sine
+  channels: 64
+  n_dilated_layers: 10
+  n_joint_layers: 3
+  norm: batch
+  context_frames: 9
+  normalize: true

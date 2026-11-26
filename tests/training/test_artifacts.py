@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import soundfile as sf
 
-from training.artifacts import R2_ENV_VARS, ArtifactStore, ValSample, _load_r2_env
+from training.artifacts import (
+    R2_ENV_VARS,
+    ArtifactStore,
+    ValSample,
+    _load_r2_env,
+    publish_results,
+)
 
 
 class FakeS3Client:
@@ -49,6 +56,25 @@ class FakeS3Client:
         source = f"{CopySource['Bucket']}/{CopySource['Key']}"
         self.objects[destination] = self.objects[source]
         return {}
+
+    def list_objects_v2(self, *, Bucket: str, Prefix: str, ContinuationToken: str = "0") -> dict:
+        """Pages of two keys, so callers must follow ``NextContinuationToken``."""
+        keys = sorted(k for k in self.objects if k.startswith(f"{Bucket}/{Prefix}"))
+        start = int(ContinuationToken)
+        page = keys[start : start + 2]
+        contents = [
+            {
+                "Key": k[len(Bucket) + 1 :],
+                "Size": len(self.objects[k]),
+                "LastModified": datetime(2026, 11, 26, tzinfo=UTC),
+            }
+            for k in page
+        ]
+        more = start + 2 < len(keys)
+        return {"Contents": contents, "IsTruncated": more, "NextContinuationToken": str(start + 2)}
+
+    def download_file(self, Bucket: str, Key: str, Filename: str) -> None:
+        Path(Filename).write_bytes(self.objects[f"{Bucket}/{Key}"])
 
 
 # ─── upload_checkpoint ──────────────────────────────────────────────────────
@@ -256,3 +282,38 @@ def test_store_without_client_or_env_is_noop(tmp_path, monkeypatch):
 
     assert store.active is False
     assert store.upload_checkpoint(ckpt) is None
+
+
+# ─── results mirror: publish_results / download_tree ────────────────────────
+
+
+def test_publish_results_mirrors_tree_without_weights_and_pulls_back(tmp_path):
+    run = tmp_path / "results" / "exp1"
+    files = {
+        "eval/metrics.json": b'{"si_sdr": 1.5}',
+        "checkpoints/validation_history.jsonl": b"{}\n",
+        "a.csv": b"x\n1\n",
+        "last.ckpt": b"weights",
+        "wandb/run-1/run.wandb": b"wandb",
+    }
+    for rel, body in files.items():
+        (run / rel).parent.mkdir(parents=True, exist_ok=True)
+        (run / rel).write_bytes(body)
+    client = FakeS3Client()
+
+    uris = publish_results(run, results_root=tmp_path / "results", client=client)
+
+    published = {"eval/metrics.json", "checkpoints/validation_history.jsonl", "a.csv"}
+    assert sorted(uris) == sorted(f"r2://ml-data/artifacts/exp1/{rel}" for rel in published)
+    assert publish_results(tmp_path / "elsewhere.csv", results_root=run, client=client) == []
+
+    store = ArtifactStore(experiment_name="exp1", client=client)
+    store.upload_checkpoint(run / "last.ckpt")
+    pulled = tmp_path / "pulled"
+    got = store.download_tree("", pulled)
+    assert {p.relative_to(pulled).as_posix() for p in got} == published
+    assert all((pulled / rel).read_bytes() == files[rel] for rel in published)
+    assert store.download_tree("", pulled) == []  # size + mtime match: nothing refetched
+    assert store.download_tree("checkpoints/last.ckpt", pulled / "w.ckpt", weights=True) == [
+        pulled / "w.ckpt"
+    ]

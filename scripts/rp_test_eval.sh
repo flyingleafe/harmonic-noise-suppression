@@ -5,9 +5,11 @@
 # matched to its validation row. One GPU job per call; one group per table:
 #
 #   omnirun submit --backend uni --gpus 1 --time 1h --name rp-test-eval \
-#       --outputs 'results/rp_test_eval/**' -- bash scripts/rp_test_eval.sh arch ablation real
+#       -- bash scripts/rp_test_eval.sh arch ablation real
 #
-# Groups (output: results/rp_test_eval/<group>/{test,valid}.json):
+# Groups (output: results/rp_test_eval/<group>/{test,valid}.json, each group
+# published to R2 as it finishes; fetch with
+# `python scripts/r2sync.py pull rp_test_eval/<group>`):
 #   pretrain  Table VI (tab:pretrain). Real-only and fine-tuned/mixed rows at the
 #             lowest five-round median of real_macro (Conv+BiGRU real-only and
 #             hard-tuned at best_real_macro_raw, HarmoF0-L2 tuned rows at
@@ -126,4 +128,5 @@ for group in "$@"; do
   mkdir -p "$out"
   python scripts/rp_panel_eval.py "${TARGETS[@]}" --validation rp_real_test --out "$out/test.json"
   python scripts/rp_panel_eval.py "${TARGETS[@]}" --validation rp_real --out "$out/valid.json"
+  python scripts/r2sync.py push "$out"
 done

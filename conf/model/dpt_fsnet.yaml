@@ -1,0 +1,25 @@
+# DPT-FSNet (Dang, Chen, Zhang, ICASSP 2022, arXiv:2104.13002) — dual-path
+# transformer full-band/sub-band fusion network, complex ratio mask.
+# Re-implemented from the paper (upstream github.com/dangf15/DPT-FSNet @ 10cbda3
+# has no licence; used only as a numerical reference). 879,460 params
+# (paper Table 1: 0.88 M). Native 16 kHz. STFT per paper §4.2: 25 ms window
+# (400, periodic Hann, start-aligned), 6.25 ms hop (100), n_fft=512; DC bin
+# dropped -> F=256. C=64, 4 dilated dense layers, B=4 dual-path blocks, h=4.
+# See src/models/dpt_fsnet.py.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.dpt_fsnet.build_dpt_fsnet
+params:
+  n_fft: 512
+  hop_length: 100
+  win_length: 400
+  channels: 64
+  dense_depth: 4
+  n_blocks: 4
+  n_heads: 4

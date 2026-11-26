@@ -1,0 +1,38 @@
+# FRCRN (Zhao, Ma, Watcharasupat, Gan, "FRCRN: Boosting Feature Representation
+# Using Frequency Recurrence for Monaural Speech Enhancement", ICASSP 2022,
+# arXiv:2206.07293) as RELEASED on ModelScope (damo/speech_frcrn_ans_cirm_16k):
+# two cascaded complex U-Nets (7 encoder / 7 decoder CR blocks, 128 channels,
+# complex FSMN frequency recurrence, complex SE attention on the skips,
+# 2-layer complex FSMN over time at the bottleneck), cIRM output.
+# Code adapted from github.com/modelscope/modelscope@987d79f0 (Apache-2.0),
+# src/models/frcrn/backbone.py; parity with upstream at fp32 rounding.
+# Params: 13,963,604 = 13,141,844 learnable + 821,760 fixed STFT/iSTFT kernels
+# (the paper's WSJ0 model is 6.9 M, its fullband DNS-2022 model 10.27 M; the
+# 16 kHz release is larger: 2 U-Nets of depth 14).
+# STFT: 640-pt sqrt-Hann window (40 ms), hop 320 (20 ms), 640-pt FFT -> 321
+# bins, un-centred; input normalised to -25 dBFS (ModelScope audio_norm) and
+# the output rescaled back to the input level.
+# Checkpoint: pytorch_model.bin (58 MB, Apache-2.0, sha256 477a2f82...d79fd612,
+# from https://modelscope.cn/models/damo/speech_frcrn_ans_cirm_16k) lives
+# locally at .cache/pretrained/frcrn/pytorch_model.bin; set params.checkpoint
+# to that path for the pretrained ("w/o tuning") baseline or to warm-start
+# (an r2:// URI also works, via utils.checkpoints.resolve_checkpoint_uri). It
+# is NOT on R2 yet: cluster jobs need it staged there first. null = random init
+# (the paper's "w/o pre-trained" baseline, trained from scratch).
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.frcrn.build_frcrn
+params:
+  checkpoint: null
+  freeze_backbone: false
+  input_norm: true
+  win_len: 640
+  win_inc: 320
+  fft_len: 640
+  win_type: hann

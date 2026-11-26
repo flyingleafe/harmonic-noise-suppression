@@ -27,7 +27,7 @@ the commands and the rules that are project-specific.
 | `src/utils/` | Legacy helpers + `utils.gridrun` (the restartable parallel unit-JSON harness — reuse it for any sweep CLI) |
 | `src/experiments/` | Research sandbox: may import anything, nothing imports it |
 | `conf/` | Hydra tree: `experiment/` (+ sibling `.md` per experiment, enforced), `model/`, `data/`, `loss/`, `metrics/`, `optim/`, `online_mix/` |
-| `scripts/` | Thin CLIs, never imported by `src/`: `derive.py`, `se_eval.py`, `rps_eval.py`, `table.py`, `bench.py`, `probe_ckpt.py`, config checks, campaign scripts |
+| `scripts/` | Thin CLIs, never imported by `src/`: `derive.py`, `se_eval.py`, `rps_eval.py`, `table.py`, `bench.py`, `probe_ckpt.py`, `r2sync.py` (results ⇄ R2), config checks, campaign scripts |
 | `tests/` | Pytest, one directory per `src/` package |
 | `docs/` | Design docs, `docs/experiments/` campaign log, `docs/data-and-artifacts.md` (dload/R2/omnirun) |
 | `writing/` | Papers (LaTeX), reports and slides (new ones: Quarto; legacy: Typst) |
@@ -43,8 +43,10 @@ python train.py experiment=<name>          # the only training entry point
 python eval.py experiment=<name>           # the only evaluation entry point
 python scripts/derive.py list|derive|adopt # the only dataset driver
 dload pull <name>                          # prefetch a dataset (R2 bucket ml-data-new; pins in dload.lock)
-omnirun submit --backend <b> --gpus 1 --time 30m --outputs 'results/<name>/**' -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=<name>'
-omnirun ps | status <job> | logs -f <job> | wait <job> | pull <job>
+omnirun submit --backend <b> --gpus 1 --time 30m -- bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=<name>'
+omnirun ps | status <job> | logs -f <job> | wait <job>
+python scripts/r2sync.py push results/<name>   # in a job: publish a non-train/eval results dir
+python scripts/r2sync.py pull <name>           # laptop: r2://ml-data/artifacts/<name>/ -> results/<name>/
 ```
 
 omnirun backends (thin client of the hetzner daemon): `uni` (Slurm `sae`,
@@ -52,13 +54,17 @@ long GPU jobs), `uni-gpushort` (≤ 1 h), `uni-cpu` (CPU-only, `--gpus 0`),
 `isambard` (Isambard-AI GH200, aarch64, ≤ 24 h; 12-hour login),
 `vast` (paid burst), `kaggle` (free CUDA validation). Needs a clean pushed
 HEAD; `.env` ships automatically. No `omnirun ssh` in daemon mode.
-Details: `docs/data-and-artifacts.md` § "Job running"; workflow: the
-`run-experiment` skill.
+Jobs collect **no** outputs (`omnirun.toml`: `outputs = []`); never pass
+`--outputs` or write to `$OMNIRUN_OUTPUT`. `train.py`/`eval.py`/`se_eval.py`/
+`rps_eval.py` publish to R2 themselves; other scripts end the job command
+with `r2sync.py push`. Details: `docs/data-and-artifacts.md` § "Job running"
+and § "Job results"; workflow: the `run-experiment` skill.
 
 ## Rules
 
-1. **Sync before analysis.** `omnirun pull <job>` for job outputs, `dload pull`
-   for datasets, `zoo`/W&B for checkpoints. Never analyse a stale `results/`.
+1. **Sync before analysis.** `python scripts/r2sync.py pull <name>` for job
+   results, `dload pull` for datasets, `zoo`/W&B for checkpoints. Never
+   analyse a stale `results/`.
 2. **Compute is finite.** One seed unless asked. No control arms that will not
    be reported. Heavy CPU work goes to `uni-cpu`, never the laptop. CUDA smoke
    tests go to `kaggle`/`uni-gpushort`, not the long queue.

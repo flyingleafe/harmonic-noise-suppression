@@ -30,10 +30,10 @@ from torch.utils.data import DataLoader
 
 from data_processing.collate import frame_collate
 from data_processing.frame_datasets import OnlineMixFrameDataset, SEValidFrameDataset
+from data_processing.streams import resolve_source
 from losses._common import get_tensor
 from metrics.separation import si_sdr
 from training.config import instantiate_model
-from utils.paths import get_data_root
 
 PASS = {"a": ("se_drone_only", "SE-valid-drone"), "b": ("se_all_harmonic", "SE-valid-drone")}
 
@@ -46,7 +46,7 @@ def _stream(policy_name: str, local_speech: bool):
         ),
     )
     if local_speech:
-        root = get_data_root() / "data" / "librispeech" / "LibriSpeech" / "train-clean-100"
+        root = resolve_source("dload:librispeech/LibriSpeech/train-clean-100")
         cfg["sources"]["speech"] = [
             {
                 "kind": "audio_files",
@@ -64,7 +64,7 @@ def _r2_client():
 
     Creds ship with every omnirun job via .env; fall back to parsing .env so a
     bare run still works. Periodic upload is what lets a cancelled job's progress
-    survive — ``omnirun pull`` is unreliable and best/last.ckpt only live in the
+    survive — omnirun collects no outputs, so best/last.ckpt only live in the
     job's ``results/`` otherwise.
     """
     acct = os.environ.get("R2_ACCOUNT_ID")

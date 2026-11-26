@@ -601,12 +601,12 @@ def build_s3c_cell(dregon_dir: str) -> Cell:
     )
 
 
-def build_s4_cell(dregon_dir: str = "data/DREGON") -> Cell:
+def build_s4_cell(dregon_dir: str = "dload:DREGON") -> Cell:
     """One 16 s cruise window of the blind-annotation prep segment,
     init = tau-aligned cleaned command telemetry (the campaign's init).
 
-    ``dregon_dir`` accepts a ``dload:`` URI, thus a cluster without a local
-    ``data/DREGON`` checkout streams the recording.
+    ``dregon_dir`` is a plain path or a ``dload:`` URI (default: the dload
+    ``DREGON`` pin, materialized into the dload cache on first use).
     """
     prep = prepare_flight_recording(S4_RID, dregon_dir=dregon_dir)
     start = max(0.0, (float(prep.ft[-1]) - S4_WIN_S) / 2.0)
@@ -1024,7 +1024,7 @@ def main() -> None:
         "geometry dregon-conditioned gen_v1_corrected by default",
     )
     ap.add_argument("--device", default="cpu", help="torch device for the generator render")
-    ap.add_argument("--dregon-dir", default="data/DREGON", help="path or dload:DREGON")
+    ap.add_argument("--dregon-dir", default="dload:DREGON", help="path or dload:DREGON")
     ap.add_argument(
         "--s3-recordings",
         default="",

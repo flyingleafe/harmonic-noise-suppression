@@ -29,10 +29,11 @@ matters as soon as one runs from a git worktree:
 
 - code — `Path(__file__).resolve().parents[2] / "src"`, so a worktree imports
   its own `tracking` / `data_processing`, never another checkout's;
-- data — `utils.paths.get_data_path("DREGON")` and `get_data_root()` for
-  `omnirun-outputs/`. `data/`, `results/` and `omnirun-outputs/` are
-  gitignored, so a worktree does not hold them: `$DATA_ROOT` wins, else the
-  main checkout (first line of `git worktree list`).
+- data — dload pins: `hk_core.DREGON` is
+  `streams.resolve_source("dload:DREGON")` and Michael's rigs come from
+  `sources.michaels.resolve_raw_root()` (the `recording_with_motor_speed`
+  pin). Both materialize once into the shared dload cache, so a worktree
+  needs no `data/` tree.
 
 ## `comb_explorer.py` — the interactive page
 

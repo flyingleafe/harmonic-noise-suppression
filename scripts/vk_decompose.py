@@ -121,10 +121,10 @@ Run::
 
     # the full recording (8 mics, k 80) on a CPU node
     omnirun submit --backend uni-cpu --gpus 0 --cpus 4 --mem 32 --time 4h \\
-      --name vk-decompose --outputs "results/vk_decompose/**" \\
-      --env PYTHONPATH=src -- \\
-      python scripts/vk_decompose.py --mode solve --jobs 2 --bw-sweep
-    omnirun pull vk-decompose
+      --name vk-decompose -- bash -c 'export PYTHONPATH="$PWD/src"; \\
+      python scripts/vk_decompose.py --mode solve --jobs 2 --bw-sweep \\
+      && python scripts/r2sync.py push results/vk_decompose'
+    python scripts/r2sync.py pull vk_decompose
     PYTHONPATH=src python scripts/vk_decompose.py --mode stitch
 
     # the v2 configuration: linewidth-matched bands, and 32 kHz so that k 80 is

@@ -8,7 +8,6 @@ the Frame wrapping end-to-end (just not GPU or model quality).
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -149,13 +148,10 @@ def test_deterministic_bank_fills_once_and_stops(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(
-    not Path("data/DREGON").is_dir(),
-    reason="needs local data/DREGON geometry (producer loads it before codebook lookup)",
-)
-def test_unknown_drone_rejected(tmp_path):
+def test_unknown_drone_rejected(tmp_path, dload_tree):
     from data_processing.generated_noise import GeneratedNoisePool
 
+    dregon = dload_tree("DREGON")  # producer loads its geometry before codebook lookup
     ck = _tiny_bundle(tmp_path, drone="michaels")
     with pytest.raises(RuntimeError):
         # producer dies (drone not in codebook) -> buffer never warms up
@@ -165,7 +161,7 @@ def test_unknown_drone_rejected(tmp_path):
             device="cpu",
             n_harmonics=8,
             duration_s=0.25,
-            dregon_dir="data/DREGON",
+            dregon_dir=str(dregon),
             n_slots=4,
             gen_batch=2,
             warmup=2,
@@ -179,11 +175,7 @@ def test_unknown_drone_rejected(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(
-    not Path("data/DREGON").is_dir(),
-    reason="interp mode loads both DREGON + Michael's geometry (needs data/DREGON)",
-)
-def test_generated_pool_interp_mode_yields_wellformed_timeframe(tmp_path):
+def test_generated_pool_interp_mode_yields_wellformed_timeframe(tmp_path, dload_tree):
     """Vicinal embedding + geometry sampling along the DREGON↔Michael's segment:
     the producer must load the flat conditioned checkpoint, interpolate z/rotor/σ,
     sample a mic rig, and still emit a well-formed (audio, exact-RPS) Frame."""
@@ -196,7 +188,7 @@ def test_generated_pool_interp_mode_yields_wellformed_timeframe(tmp_path):
         device="cpu",
         n_harmonics=8,
         duration_s=0.25,
-        dregon_dir="data/DREGON",
+        dregon_dir=str(dload_tree("DREGON")),  # interp loads DREGON + Michael's geometry
         n_slots=8,
         gen_batch=2,
         warmup=2,
@@ -285,7 +277,7 @@ def _load_params(ckpt: str, **over) -> dict:
         "flight_fs": 200.0,
         "gen_batch": 2,
         "drone": "dregon",
-        "dregon_dir": "data/DREGON",
+        "dregon_dir": "dload:DREGON",
         "interp": None,
     }
     params.update(over)

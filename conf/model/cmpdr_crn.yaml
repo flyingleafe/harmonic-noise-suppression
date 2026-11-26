@@ -1,0 +1,50 @@
+# cMPDR + CRNN (Bologni, Arrieta Larraza, Heusdens, Hendriks, "A two-step
+# approach for speech enhancement in low-SNR scenarios using cyclostationary
+# beamforming and DNNs", EUSIPCO 2026, arXiv:2602.12986). See src/models/cmpdr/.
+# Upstream: github.com/narrietal/cMPDR_DNN @753c04cbe986 (networks, Keras, MIT)
+# + github.com/Screeen/cmvdr @fe4386cda30b (cMPDR filter, NumPy/SciPy, MIT).
+# Stage 1, blind cMPDR (no parameters, no gradients, float64): periodic Hann
+# 2048 / hop 512, cyclic frequencies from the top-10 periodogram peaks
+# (131072-pt FFT of <= 2 s, 20-2500 Hz), pairwise differences pruned by
+# spectral coherence > 0.6, <= 8 shifts per bin, recursive covariance with
+# forgetting factor 0.05, loading to condition number 1000.
+# Stage 2, CRNN: 181,913 trainable parameters + 32 BatchNorm statistics =
+# 181,945 as Keras counts (verified against the Keras model). The paper's
+# Table I says 0.46M; the released code gives 0.18M (see networks.py report).
+# STFT: 512 window (sqrt Hann / 2, WOLA), 128 hop, 512-pt FFT -> 257 bins.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.cmpdr.build_cmpdr
+params:
+  network: crnn
+  use_cmpdr: true
+  frontend:
+    sr: 16000
+    nfft: 2048
+    overlap_fraction: 0.75
+    forgetting_factor: 0.05
+    condition_number: 1000.0
+    p_max: 8
+    harmonic_threshold: 0.6
+    freq_range_cyclic: [20.0, 2500.0]
+    peaks_nfft: 131072
+    peaks_max_len_seconds: 2.0
+    peaks_wait_len_seconds: 0.05
+    peaks_min_dist_hz: 20.0
+    peaks_max_ratio_from_highest: 10000.0
+    peaks_min_width: 1.0
+    max_num_peaks: 10
+    coherence_min_relative_power: 1000.0
+    alpha_rel_tol: 1.0e-3
+    dtype: float64
+  network_params:
+    block_len: 512
+    block_shift: 128
+    rnn_units: 128
+    dropout: 0.25

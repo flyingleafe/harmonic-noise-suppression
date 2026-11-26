@@ -76,6 +76,7 @@ import scipy.signal as sg
 import scipy.stats as st
 
 from data_processing.sources import michaels as MI
+from data_processing.streams import resolve_source
 from tracking.rotors import MIXER, MODE_NAMES
 
 # ─── Frozen analysis constants ────────────────────────────────────────────────
@@ -106,13 +107,15 @@ DIAG_PAIRS = (1, 4)  # RFront-LBack, LFront-RBack
 DREGON_TO_MIXER = (2, 3, 0, 1)
 DREGON_NATIVE_ORDER = ("LBack", "RBack", "RFront", "LFront")
 
+_RWMS_ROOT = Path(resolve_source("dload:recording_with_motor_speed"))
+_NDN_ROOT = Path(resolve_source("dload:new-drone-noises"))
 MICHAELS_FILES = {
-    "FLY124": "data/recording_with_motor_speed/recording_1/FLY124.csv",
-    "FLY125": "data/recording_with_motor_speed/recording_2/FLY125.csv",
-    "FLY103": "data/new-drone-noises/FLY103.csv",
-    "FLY108": "data/new-drone-noises/FLY108.csv",
+    "FLY124": str(_RWMS_ROOT / "recording_1" / "FLY124.csv"),
+    "FLY125": str(_RWMS_ROOT / "recording_2" / "FLY125.csv"),
+    "FLY103": str(_NDN_ROOT / "FLY103.csv"),
+    "FLY108": str(_NDN_ROOT / "FLY108.csv"),
 }
-DREGON_ROOT = Path("data/DREGON")
+DREGON_ROOT = Path(resolve_source("dload:DREGON"))
 OUT_DIR = Path("results/rps_traj/explore")
 
 MODE_UNIT = MIXER / np.linalg.norm(MIXER, axis=0, keepdims=True)  # (4, 4) unit columns
@@ -189,7 +192,7 @@ def _michaels_attrs(path: Path) -> dict[str, str]:
 
 
 def _dregon_mats() -> list[Path]:
-    # ``data/DREGON/nosource/`` holds byte-duplicates of the per-recording
+    # The DREGON tree's ``nosource/`` holds byte-duplicates of the per-recording
     # directories; take only the per-recording trees.
     return sorted(DREGON_ROOT.glob("DREGON_*_room*/*_motors.mat"))
 

@@ -1,0 +1,33 @@
+# SMoLnet-T — Tan & Khong, "SMoLnet-T: An Efficient Complex-spectral Mapping
+# Speech Enhancement Approach with Frame-wise CNN and Spectral Combination
+# Transformer for Drone Audition", APSIPA ASC 2024
+# (doi:10.1109/APSIPAASC63619.2025.10848922). No public code; re-implemented
+# from the paper in src/models/smolnet_se.py (see its docstring).
+# Frame-wise CNN (10 frequency-dilated (3,1) conv layers, 64 ch, LayerNorm over
+# frequency + ReLU) -> M spectral combination transformers over TIME per
+# frequency bin (sinusoidal PE, MHA, FFN 64-256-64, post-LN) -> Linear(64, 2).
+# Params (measured): 182,230 / 232,214 / 282,198 for M = 1 / 2 / 3 (paper
+# Table I: 192k / 254k / 317k, i.e. -5.1 / -8.6 / -11.0 %). This is the
+# equations-as-written reading ("interpretation 1" in the module docstring,
+# which lists the other readings tried with their measured counts).
+# STFT: n_fft = win = 2048, hop 1024 (50 %), Hamming window, F = 1025.
+# Unstated in the paper, chosen here: 16 kHz, 8 heads.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.smolnet_se.build_smolnet_t
+params:
+  n_fft: 2048
+  hop_length: 1024
+  window: hamming
+  channels: 64
+  n_cnn_layers: 10
+  n_transformers: 3
+  n_heads: 8
+  ffn_mult: 4
+  normalize: true

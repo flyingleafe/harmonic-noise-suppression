@@ -111,12 +111,13 @@ FIT_MAX_FRAMES = 256
 FIT_POOL_COST_COMMAND = (
     "omnirun --daemon localhost:18787 submit --backend uni-cpu --gpus 0 --cpus 16 "
     "--mem 64 --time 1h --name nv2-r5-pin-cost "
-    "--outputs 'results/noise_v2/rounds/round5/calibration/**' -- bash -lc '"
+    "-- bash -lc '"
     "export PYTHONPATH=src; "
     "python scripts/noise_v2_supports.py build --set dregon-floor "
     "--out results/noise_v2/rounds/round5/supports; "
     "python scripts/noise_v2_calibrate_dregon.py pin --pool fit --allow-fit-pool "
-    "--out results/noise_v2/rounds/round5/calibration_fitpool'"
+    "--out results/noise_v2/rounds/round5/calibration_fitpool && "
+    "python scripts/r2sync.py push results/noise_v2/rounds/round5/calibration_fitpool'"
 )
 #: What each priced pool IS, recorded beside every number priced on it.
 COST_POOL_NOTE = {

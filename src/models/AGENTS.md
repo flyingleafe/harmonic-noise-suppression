@@ -29,9 +29,9 @@ src/models/
   fkla/                 Vendored plain-KLA flat layer (kla-loglinear@11e5a39)
   dcunet.py / dccrn.py  DCUNet / DCCRN, encoder-side RPS fusion
   dcunet_refactored.py  DCUNetRefactored / DCCRNRefactored, decoder-side RPS fusion
-  demucs4ht.py / htdemucs_ft.py / tfgridnet.py / mpsenet.py / sgmse/ / diffusion_buffer.py / dptnet/
-                        SE baselines (HTDemucs + official-checkpoint fine-tune, TF-GridNet, MP-SENet,
-                        SGMSE+, DiffusionBuffer, DPTNet)
+  demucs4ht.py htdemucs_ft.py tfgridnet.py mpsenet.py sgmse/ diffusion_buffer.py dptnet/ bsrnn.py
+  dpt_fsnet.py drofit.py smolnet_se.py tflocoformer.py cmpdr/ droneaudionet/ flowse/ frcrn/
+  mpsenet_official/ storm/   docs/se-baselines-model-set.md
   edge_bs_rof/          BSRoformer, MelBandRoformer; rps.py = Edge-BS-RoFormer trunk for RPS
   generative/           RPS → noise generators — docs/noise-generator-models.md
 ```
@@ -44,7 +44,7 @@ src/models/
 `dcunet`, `dccrn` (encoder-side RPS: `use_rps`, `dcunet_rps_fusion`),
 `dcunet_refactored`, `dccrn_refactored` (decoder-side RPS only: `rps_fusion`),
 `rps_predictor`, `dptnet`, `htdemucs`, `diffusion_buffer`, `sgmse`.
-**Direct factories** (`DIRECT_FACTORY_TYPES`): `tfgridnet`, `mpsenet`, `htdemucs_ft`.
+**Direct factories** (`DIRECT_FACTORY_TYPES`): `tfgridnet`, `mpsenet`, `htdemucs_ft`, 2026-11 ports.
 **Noise generators** (`NOISE_GEN_MODEL_REGISTRY`): `positional_harmonic_gen`,
 `positional_harmonic_wind_gen`.
 

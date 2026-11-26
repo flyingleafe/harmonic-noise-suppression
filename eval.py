@@ -5,7 +5,8 @@ Loads a checkpoint (``cfg.checkpoint`` or
 ``results/<experiment_name>/last.ckpt``), runs the configured
 :class:`~metrics.suite.MetricSuite` over ``cfg.data.valid``, and writes
 ``results/<experiment_name>/eval/{metrics.json,per_sample.csv,per_snr.csv}``
-(the last only when any sample carries ``meta.input_snr``).
+(the last only when any sample carries ``meta.input_snr``) and publishes them
+to ``r2://ml-data/artifacts/<experiment_name>/eval/`` (``ArtifactStore``).
 
 Examples::
 
@@ -104,39 +105,39 @@ def main(cfg: DictConfig) -> None:
     out_dir = Path(cfg.results_root) / cfg.experiment_name / "eval"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    (out_dir / "metrics.json").write_text(json.dumps(means, indent=2))
+    written = [out_dir / "metrics.json", out_dir / "per_sample.csv"]
+    written[0].write_text(json.dumps(means, indent=2))
 
-    with open(out_dir / "per_sample.csv", "w", newline="") as f:
+    with open(written[1], "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["sample", *metric_names, "input_snr"])
         writer.writeheader()
         for i, row in enumerate(result.rows):
             writer.writerow({"sample": i, **row})
 
-    per_snr_written = False
     if any(row.get("input_snr") is not None for row in result.rows):
         grouped = result.grouped("mean")
-        with open(out_dir / "per_snr.csv", "w", newline="") as f:
+        written.append(out_dir / "per_snr.csv")
+        with open(written[-1], "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["input_snr", *metric_names])
             writer.writeheader()
             for snr in sorted(grouped, key=lambda k: (k is None, k)):
                 writer.writerow({"input_snr": snr, **grouped[snr]})
-        per_snr_written = True
 
-    # Publish eval outputs next to the experiment's checkpoints on R2
-    # (``artifacts/<experiment>/eval/``) — the zoo cache harvests them, so
-    # metrics travel with the artifact store. Same defensive store as
-    # training: a no-op without creds / with artifacts.enabled=false.
+    # Publish every eval output to its R2 mirror (``artifacts/<experiment>/eval/``)
+    # — the only channel results leave a remote job by (omnirun collects no
+    # outputs); the zoo cache harvests ``metrics.json``. Same defensive store
+    # as training: a no-op without creds / with artifacts.enabled=false.
     store: Any = ArtifactStore(
         experiment_name=cfg.experiment_name,
         bucket=cfg.artifacts.bucket,
         prefix=cfg.artifacts.prefix,
         enabled=cfg.artifacts.enabled,
     )
-    uploaded = store.upload_file(out_dir / "metrics.json", "eval/metrics.json")
-    if per_snr_written:
-        store.upload_file(out_dir / "per_snr.csv", "eval/per_snr.csv")
-    if uploaded:
-        print(f"Eval metrics uploaded to {uploaded}")
+    uploaded = [store.upload_file(path, f"eval/{path.name}") for path in written]
+    if all(uploaded):
+        print(f"Eval outputs uploaded to {uploaded[0].rsplit('/', 1)[0]}/")
+    else:
+        print("WARNING: eval outputs NOT (fully) published to R2 — see the log above.")
 
     print(f"Eval results written to {out_dir}")
     print(json.dumps(means, indent=2))

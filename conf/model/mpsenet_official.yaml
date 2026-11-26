@@ -1,0 +1,36 @@
+# MP-SENet, CURRENT official release (generator only; the metric discriminator
+# and losses live in models.mpsenet_official.{discriminator,losses}).
+# Paper: Lu, Ai, Ling, "MP-SENet", Interspeech 2023 (arXiv:2305.13686); long
+# version "Explicit Estimation of Magnitude and Phase Spectra in Parallel for
+# High-Quality Speech Enhancement", Neural Networks 2025 (arXiv:2308.08926).
+# Upstream: github.com/yxlu-0102/MP-SENet @ 89932cfe90d1dacb8e170e4a331d762462c21792
+# (MIT). Generator 2,263,372 parameters (paper: 2.26M); discriminator 181,650.
+# STFT native 16 kHz: n_fft 400, hop 100, win 400 (periodic Hann), center,
+# reflect pad, F = 201; magnitude compression |X|**0.3; per-utterance RMS
+# normalisation inside forward. Upstream trains fp32.
+# transformer_layout: per_utterance = upstream's single-utterance computation,
+# batch-independent; "upstream" reproduces its cross-utterance batch coupling.
+# Published weights: checkpoint: .cache/pretrained/mpsenet_official/g_best_vb
+# (or g_best_dns), copied from the repository's best_ckpt/.
+# Not to be confused with conf/model/f1_mpsenet.yaml (older hybrid port).
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.mpsenet_official.build_mpsenet_official
+params:
+  n_fft: 400
+  hop_size: 100
+  win_size: 400
+  compress_factor: 0.3
+  dense_channel: 64
+  num_tsconformers: 4
+  n_heads: 4
+  beta: 2.0
+  sampling_rate: 16000
+  transformer_layout: per_utterance
+  checkpoint: null

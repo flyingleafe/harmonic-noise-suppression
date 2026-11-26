@@ -152,7 +152,7 @@ def _to_plain(cfg: Any) -> Any:
 
 
 def load_geometry(
-    drone: str, dregon_dir: str | Path = "data/DREGON"
+    drone: str, dregon_dir: str | Path = "dload:DREGON"
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return ``(mic_positions (M,3), rotor_positions (R,3))`` for a drone name."""
     _ensure_src_on_path()
@@ -579,7 +579,7 @@ class GeneratedNoisePool:
         warmup: int = 16,
         refresh: bool = True,
         device: str = "cuda:0",
-        dregon_dir: str | Path = "data/DREGON",
+        dregon_dir: str | Path = "dload:DREGON",
         seed: int = 0,
         warmup_timeout_s: float = 60.0,
         interp: dict[str, Any] | None = None,
@@ -689,7 +689,7 @@ class GeneratedNoisePool:
             warmup=int(buf.get("warmup", 16)),
             refresh=bool(g("refresh", True)),
             device=str(g("device", "cuda:0")),
-            dregon_dir=str(g("dregon_dir", "data/DREGON")),
+            dregon_dir=str(g("dregon_dir", "dload:DREGON")),
             seed=int(g("seed", 0)),
         )
 

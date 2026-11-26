@@ -1,0 +1,37 @@
+# Blind single-channel cMPDR filter alone (Bologni, Heusdens, Hendriks,
+# arXiv:2510.18391; the pre-processor of arXiv:2602.12986). See
+# src/models/cmpdr/frontend.py. Upstream: github.com/Screeen/cmvdr
+# @fe4386cda30b (MIT), `cmvdr` CLI with presets/inference.yaml.
+# 0 parameters: evaluation only, nothing to train. Periodic Hann 2048 / hop
+# 512 STFT (SciPy ShortTimeFFT layout, magnitude scaling), float64.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.cmpdr.build_cmpdr
+params:
+  network: null
+  use_cmpdr: true
+  frontend:
+    sr: 16000
+    nfft: 2048
+    overlap_fraction: 0.75
+    forgetting_factor: 0.05
+    condition_number: 1000.0
+    p_max: 8
+    harmonic_threshold: 0.6
+    freq_range_cyclic: [20.0, 2500.0]
+    peaks_nfft: 131072
+    peaks_max_len_seconds: 2.0
+    peaks_wait_len_seconds: 0.05
+    peaks_min_dist_hz: 20.0
+    peaks_max_ratio_from_highest: 10000.0
+    peaks_min_width: 1.0
+    max_num_peaks: 10
+    coherence_min_relative_power: 1000.0
+    alpha_rel_tol: 1.0e-3
+    dtype: float64

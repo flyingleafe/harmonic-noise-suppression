@@ -476,6 +476,11 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   `zenodo_drone_noises`, `new_motor_data` (November 2026: FLY013 in `10_Nov/`,
   FLY018 in `14_Nov/`, FLY022 in `15_Nov/`). Each session includes its original
   DJI DAT, DatCon CSV and stereo ZOOM WAV; the first two also include a JPG.
+  External raws kept only in dload (no local copy, no frames builder yet):
+  `UOEMD-VAFCVS` (University of Ottawa induction-motor vibration + acoustic
+  faults, Mendeley `msxs4vj48g` v2, 257 files) and `AuDroK` (all seven Mobilithek
+  distributions of the AUDROK drone sound data: `Measurements_*` XML containers
+  of base64 WAVs, `Dresden-II-S-{A,B}` outdoor WAVs, `Angebotsbeschreibung.xml`).
 - **Derived DREGON-LM** (17, `sample-dir-v1`, per split):
   `DREGON-LM-{train,valid}`, `DREGON-LM-V2-{train,valid}`,
   `DREGON-LM-V3-{train,valid}`, `DREGON-LM-V4-{train,valid}`,

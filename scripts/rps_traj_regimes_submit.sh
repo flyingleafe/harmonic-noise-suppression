@@ -21,13 +21,13 @@
 #
 # ALL JOBS ARE SUBMITTED FROM ONE DETACHED WORKTREE at the pinned SHA
 # (.worktrees/submit-rps-regimes): omnirun refuses a dirty tree, and a later
-# edit to the main checkout must not change what a queued job runs.  Collect
-# with `omnirun pull <job>` FROM THAT WORKTREE: its results/rps_traj/regimes
-# is linked to the main checkout's, so the unit JSONs land there.
+# edit to the main checkout must not change what a queued job runs.  Each job
+# pushes its own files to R2; collect them in the main checkout with
+# `python scripts/r2sync.py pull rps_traj/regimes` (lands in results/).
 #
 # A unit that fails leaves <uid>.err beside the JSONs and the rest go on; the
 # job prints the number of .err files as its last line and fails if any pass
-# did (its outputs are collected either way).  Re-submitting a rig at the same
+# did (its files are pushed either way).  Re-submitting a rig at the same
 # SHA resumes it: the cluster worktree keeps the finished units.
 set -euo pipefail
 
@@ -94,16 +94,18 @@ fi
 for t in "${TARGETS[@]}"; do
   if [ "$t" = bench ]; then
     payload="$ENV_WRAPPER; python scripts/rps_traj_regimes.py bench --rigs michaels pitcn_quad"
+    payload="$payload && python scripts/r2sync.py push $OUT/bench_device.json"
     submit bench omnirun submit --backend uni-gpushort --gpus 1 --cpus 8 --mem 32 --time 20m \
-      --name rps-regimes-bench --outputs "$OUT/bench_device.json" -- bash -lc "$payload"
+      --name rps-regimes-bench -- bash -lc "$payload"
     continue
   fi
   run="python scripts/rps_traj_regimes.py run --rigs $t --jobs $((CPUS / 2)) --threads 2"
   payload="$ENV_WRAPPER; st=0; $run --stage cruise || st=1; $run --stage cruise --final || st=1"
   payload="$payload; $run --stage flight || st=1"
   payload="$payload; $run --stage flight --final --arms ours msvar hsmm || st=1"
+  payload="$payload; python scripts/r2sync.py push $OUT/raw/*__${t}__* >/dev/null || st=1"
   payload="$payload; echo \"failed units: \$(ls $OUT/raw/*__${t}__*.err 2>/dev/null | wc -l)\""
   payload="$payload; exit \$st"
   submit "$t" omnirun submit --backend uni-cpu --gpus 0 --cpus "$CPUS" --mem "$MEM" --time "$TIME" \
-    --name "rps-regimes-${t//_/-}" --outputs "$OUT/raw/*__${t}__*" -- bash -lc "$payload"
+    --name "rps-regimes-${t//_/-}" -- bash -lc "$payload"
 done

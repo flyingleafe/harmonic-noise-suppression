@@ -589,8 +589,8 @@ def load_dregon_timeframes(
     Parameters
     ----------
     data_dir : Path | str
-        Root data directory (contains ``DREGON/`` subdirectory) or the DREGON
-        tree itself (when the directory ends with ``DREGON``).
+        The DREGON tree itself (e.g. a materialized ``dload:DREGON``) or an
+        enclosing data directory holding it as a ``DREGON/`` subdirectory.
     splits : list[str] | None
         Which splits to load (e.g. ``["in_flight_noise"]``). ``None`` = all.
     target_sr : int | None
@@ -599,9 +599,10 @@ def load_dregon_timeframes(
         Download missing data if ``True``.
     """
     data_dir = Path(data_dir)
-    dregon_dir = data_dir if data_dir.name == "DREGON" else data_dir / "DREGON"
     if download:
         download_dregon(data_dir if data_dir.name != "DREGON" else data_dir.parent)
+    nested = data_dir / "DREGON"
+    dregon_dir = nested if nested.is_dir() else data_dir
     geometry = get_geometry(dregon_dir)
     all_samples = discover_recordings(dregon_dir)
     if splits is not None:

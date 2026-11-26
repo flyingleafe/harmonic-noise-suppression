@@ -18,8 +18,10 @@ primary invocations:
   → ``se_eval.py --method f1_dcunet_a --valid SE-valid-drone
   --loss-breakdown --grad-norms --loss-cfg conf/loss/si_sdr_mrstft.yaml``.
 * ``run_se_perclip_eval.sh`` / ``run_f2_perclip_eval.sh`` → a shell loop over
-  ``se_eval.py --method <m> --valid <v> --r2-upload`` (the method × valid
-  matrices live in the experiment docs, not in checked-in drivers).
+  ``se_eval.py --method <m> --valid <v>`` (the method × valid matrices live in
+  the experiment docs, not in checked-in drivers). Every CSV written below
+  ``results/`` is published to its R2 mirror (``training.artifacts.publish_results``;
+  fetch with ``scripts/r2sync.py pull se_eval``).
 
 Model methods load through ``zoo.load`` (Hydra experiment compose + local
 ``results/<exp>/best.ckpt`` else the R2 artifact store), so any experiment
@@ -373,11 +375,6 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=0, help="torch CPU threads (0=default)")
     ap.add_argument("--out", default=None, help="output CSV path")
     ap.add_argument(
-        "--r2-upload",
-        action="store_true",
-        help="upload the CSV to artifacts/<method>/<granularity>/<basename> via ArtifactStore",
-    )
-    ap.add_argument(
         "--loss-breakdown",
         action="store_true",
         help="print per-SNR loss-term values instead of writing a CSV (experiment methods only)",
@@ -441,13 +438,10 @@ def main() -> None:
     if args.granularity == "group":
         # Echo grouped CSVs so results are recoverable from `omnirun logs`.
         print("----- CSV -----\n" + out_path.read_text() + "----- END CSV -----", flush=True)
-    if args.r2_upload:
-        from training.artifacts import ArtifactStore
+    from training.artifacts import publish_results
 
-        store = ArtifactStore(experiment_name=args.method)
-        uri = store.upload_file(out_path, f"{args.granularity}/{out_path.name}")
-        if uri:
-            print(f"uploaded -> {uri}", flush=True)
+    for uri in publish_results(out_path):
+        print(f"uploaded -> {uri}", flush=True)
 
 
 if __name__ == "__main__":

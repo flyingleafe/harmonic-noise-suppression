@@ -35,7 +35,9 @@ under ``<out>/raw/``, restartable.
     (``docs/experiments/telemetry-fitness.md`` § "The re-score").
 
 ``--mode report`` — re-aggregate ``<out>/raw/*.json`` into the tables and the
-    figure without recomputing anything (the local step after ``omnirun pull``).
+    figure without recomputing anything (the local step after
+    ``python scripts/r2sync.py pull fvk_telemetry``; the job pushes its ``<out>`` with
+    ``r2sync.py push``).
 
 Run::
 
@@ -47,9 +49,9 @@ Run::
     python scripts/fvk_telemetry.py --mode score --jobs 4
 
     # step 3, cluster (builds its own prep cache from the pinned dataset)
-    omnirun submit --backend uni-cpu --gpus 0 --cpus 16 --mem 32 --time 4h \
-      --env PYTHONPATH=src -- \
-      python scripts/fvk_telemetry.py --mode opt --jobs 15 --build-preps
+    omnirun submit --backend uni-cpu --gpus 0 --cpus 16 --mem 32 --time 4h -- \
+      bash -c 'export PYTHONPATH="$PWD/src"; python scripts/fvk_telemetry.py --mode opt \
+      --jobs 15 --build-preps && python scripts/r2sync.py push results/fvk_telemetry'
 
 Outputs: ``<out>/summary.json``, ``<out>/tables/*.csv``, ``<out>/refined/*.npz``
 and ``<out>/fig_oracle_sanity.{png,svg}``.

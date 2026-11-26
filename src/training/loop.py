@@ -45,6 +45,7 @@ from typing import Any
 import numpy as np
 import tdseries as td
 import torch
+from omegaconf import OmegaConf
 from torch.amp.grad_scaler import GradScaler
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, IterableDataset
@@ -640,6 +641,12 @@ def run_training(cfg: Any, *, artifact_store: ArtifactStore | None = None) -> di
         )
     )
     upload = bool(cfg.artifacts.upload_checkpoints)
+    # The resolved config is part of the run record (W&B config carries only
+    # the commit + experiment name); R2 mirror: artifacts/<exp>/config.yaml.
+    config_path = run_dir / "config.yaml"
+    config_path.write_text(OmegaConf.to_yaml(cfg, resolve=True))
+    if upload:
+        store.upload_file(config_path, "config.yaml")
     if getattr(cfg, "checkpoint", None):
         _warm_start(model, str(cfg.checkpoint), device, artifacts_cfg=cfg.artifacts)
     loss_fn = build_losses(cfg.loss).to(device)

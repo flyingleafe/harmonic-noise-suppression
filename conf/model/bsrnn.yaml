@@ -1,0 +1,28 @@
+# BSRNN — the URGENT 2026 challenge (track 1) discriminative baseline, fixed at
+# 16 kHz mono. Paper: Yu, Chen, Luo, Gu, Weng, "High Fidelity Speech
+# Enhancement with Band-split RNN", Interspeech 2023 (arXiv:2212.00406); the
+# port follows the challenge model, not the paper's sizes.
+# Upstream: github.com/urgent-challenge/urgent2026_challenge_track1
+# @b1dc3ad1 (Apache-2.0), baseline_code/models/bsrnn.py + conf/models/
+# BSRNN_baseline.yaml, network = ESPnet espnet2/enh/layers/bsrnn.py @v.202412.
+# Parameters: 33,628,912 (upstream reports "32.05 M" = 33,602,316 / 2**20,
+# GroupNorm affines not counted). Bit-exact (max |diff| = 0) against upstream.
+# STFT: Hann, n_fft = win = 320, hop = 160 (20 ms / 10 ms), center=True,
+# F = 161; 27 bands of the 48 kHz table (the last one zero-padded 21 -> 40).
+# Pretrained weights (optional): checkpoint: .cache/pretrained/bsrnn/bsrnn.ckpt
+# from huggingface.co/lichenda/icassp_2026_urgent_baseline (bsrnn.ckpt, 151 MB).
+# See src/models/bsrnn.py.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.bsrnn.build_bsrnn
+params:
+  num_channel: 196
+  num_layer: 6
+  causal: false
+  checkpoint: null

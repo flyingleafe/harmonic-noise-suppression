@@ -95,7 +95,7 @@ class GPRotorNoisePool:
         table_rps_step: float = 0.5,
         query_chunk: int = 256,
         target_rms: float = 0.1,
-        dregon_dir: str | Path = "data/DREGON",
+        dregon_dir: str | Path = "dload:DREGON",
     ):
         if rotor_mode not in ("per_rotor", "mean"):
             raise ValueError(f"rotor_mode must be 'per_rotor' or 'mean', got {rotor_mode!r}")
@@ -224,7 +224,7 @@ class GPRotorNoisePool:
             table_rps_max=float(table.get("rps_max", 92.0)),
             table_rps_step=float(table.get("rps_step", 0.5)),
             target_rms=float(g("target_rms", 0.1)),
-            dregon_dir=str(g("dregon_dir", "data/DREGON")),
+            dregon_dir=str(g("dregon_dir", "dload:DREGON")),
         )
 
     def close(self) -> None:  # interface parity with the other pools

@@ -12,8 +12,8 @@
 train:
   _target_: data_processing.frame_datasets.NoiseGenFrameDataset.build_train
   params:
-    dregon_dir: data/DREGON
-    michaels_dir: data/new-drone-noises
+    dregon_dir: dload:DREGON
+    michaels_dir: dload:new-drone-noises
     sample_rate: 16000
     chunk_size: 16000
     train_samples: 6000
@@ -26,8 +26,8 @@ train:
 valid:
   _target_: data_processing.frame_datasets.NoiseGenFrameDataset.build_valid
   params:
-    dregon_dir: data/DREGON
-    michaels_dir: data/new-drone-noises
+    dregon_dir: dload:DREGON
+    michaels_dir: dload:new-drone-noises
     sample_rate: 16000
     chunk_size: 16000
     train_samples: 6000

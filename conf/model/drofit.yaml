@@ -1,0 +1,43 @@
+# DroFiT (base) — band-fused frequency-attention UAV speech enhancer.
+# Paper: J. Lee, C. Jeon, H. Seo, K. Shim, T. Kang, "DroFiT: A Lightweight
+#   Band-Fused Frequency Attention Toward Real-Time UAV Speech Enhancement",
+#   Interspeech 2026, doi:10.21437/Interspeech.2026-1620 (final version; the
+#   arXiv:2509.16945 v1/v2 text describes an earlier 0.105 M model).
+# Upstream code: none published (demo page https://ml-sp.github.io/DroFiT/);
+#   re-implemented from the paper, see src/models/drofit.py for the trace and
+#   the unstated settings.
+# Parameters: 167,884 (paper Table 3: 0.168 M). ffn_hidden is the one free size,
+#   chosen to match that count.
+# MACs (Conv/Linear weights + attention matmuls, BN/act/STFT not counted):
+#   0.328 G per 1 s of audio, 1.61 G per 5 s utterance (paper: 2.14 G, time basis
+#   not stated). attention: linear (DroFiT-Lite) -> 0.259 G / 1 s (paper 1.21 G).
+# STFT: native 16 kHz, n_fft=1024, hop=512, periodic Hann (win=1024),
+#   center=True -> 513 bins, 31.25 frames/s; complex mask, no resampling.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.drofit.build_drofit
+params:
+  n_fft: 1024
+  hop_length: 512
+  enc_channels: [2, 4, 16, 32]
+  enc_kernels: [6, 8, 6]
+  enc_strides: [2, 2, 2]
+  band_splits: [32, 32, 64, 128, 257]
+  band_tokens: [8, 8, 6, 5, 5]
+  n_pre_tcn: 1
+  n_transformer: 4
+  n_post_tcn: 2
+  tcn_kernel: 3
+  n_heads: 4
+  ffn_hidden: 160
+  ffn_kernel: 3
+  mask_hidden: 16
+  mask_kernel: 3
+  dropout: 0.1
+  attention: softmax

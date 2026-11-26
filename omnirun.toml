@@ -3,7 +3,13 @@
 # omnirun daemon — see docs/data-and-artifacts.md § "Job running".
 
 [job]
-outputs = ["results/**"]
+# Collect nothing. Jobs publish explicitly: train.py/eval.py upload their run
+# records to r2://ml-data/artifacts/<exp>/ (ArtifactStore) + W&B; any other
+# results/<name> is pushed with `python scripts/r2sync.py push results/<name>`.
+# A non-empty `--outputs` replaces this list per job — do not pass one: the
+# daemon copies outputs to the omnirun-artifacts bucket under the job id, a
+# second, job-namespaced copy of everything matched.
+outputs = []
 
 [job.resources]
 gpus = 1

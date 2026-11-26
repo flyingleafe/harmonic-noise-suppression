@@ -37,6 +37,9 @@ Run::
 
 Outputs: pooled table on stdout + ``<out>/<tag>/report.json`` and
 ``per_window.csv`` (+ ``raw/*.json`` refinement units when ``--refine``).
+The two tables are published to their R2 mirror when ``<out>`` is below
+``results/`` (``training.artifacts.publish_results``; fetch with
+``scripts/r2sync.py pull rps_eval/<tag>``); the units and preps stay local.
 """
 
 from __future__ import annotations
@@ -81,6 +84,7 @@ from tracking.protocols import (  # noqa: E402
     iter_windows,
     to_frame,
 )
+from training.artifacts import publish_results  # noqa: E402
 from utils.gridrun import Unit, add_gridrun_args, gridrun_from_args, unit_path  # noqa: E402
 
 REFINERS = ("none", "pi_kalman", "vk", "warp")
@@ -485,6 +489,9 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(rows)
     print(f"\n[rps_eval] wrote {out_dir}/report.json, per_window.csv", flush=True)
+    for name in ("report.json", "per_window.csv"):
+        for uri in publish_results(out_dir / name):
+            print(f"[rps_eval] uploaded -> {uri}", flush=True)
     return 0
 
 

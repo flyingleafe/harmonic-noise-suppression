@@ -149,13 +149,12 @@ PREDECESSOR = {
 
 
 def prepare_recording(
-    rid: str, seg_len: float = SEG_LEN_S, dregon_dir: str | Path = Path("data") / "DREGON"
+    rid: str, seg_len: float = SEG_LEN_S, dregon_dir: str | Path = "dload:DREGON"
 ) -> Prepared:
     """Load a recording, estimate tau, cut the mid-flight evaluation segment.
 
     ``dregon_dir`` accepts a plain path or a ``dload:DREGON`` URI (resolved via
-    ``data_processing.streams.resolve_source``) so remote jobs without a
-    ``data/`` checkout can stream the dataset.
+    ``data_processing.streams.resolve_source``; the default is the dload pin).
     """
     from data_processing.streams import resolve_source
 

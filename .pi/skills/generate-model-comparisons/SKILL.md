@@ -12,7 +12,7 @@ Generates publication-ready comparison plots and summary tables from evaluation 
 Before generating comparisons, ensure evaluation results are synced:
 
 ```bash
-omnirun pull <job>            # per omnirun job (collects results/**)
+python scripts/r2sync.py pull <name>   # published results: r2://ml-data/artifacts/<name>/ -> results/<name>/
 ```
 
 Then generate comparisons:
@@ -34,7 +34,7 @@ When the user requests comparison plots or tables:
 
 1. **Sync results first** (if not already done):
    ```bash
-   omnirun pull <job>
+   python scripts/r2sync.py pull <name>
    ```
 
 2. **Generate comparison** with selected models and output location:
@@ -144,7 +144,7 @@ This generates both metric plots/tables AND audio comparison plots in the same o
 
 ## Notes
 
-- **Always sync results first**: Run `omnirun pull <job>` before generating comparisons
+- **Always sync results first**: Run `python scripts/r2sync.py pull <name>` before generating comparisons (jobs publish to R2; omnirun collects no outputs)
 - **Model names are case-sensitive**: Use exact names as listed above
 - **Output directory is created automatically**: Parent directories are created if needed
 - **Plots are publication-ready**: 300 DPI PNG format with proper styling
@@ -158,7 +158,7 @@ This generates both metric plots/tables AND audio comparison plots in the same o
 If evaluation directory is missing:
 ```
 Error: Evaluation directory not found: results/evaluation/evaluation
-Hint: Run 'omnirun pull <job>' first to sync results from the training server/cluster
+Hint: Run 'python scripts/r2sync.py pull <name>' first to sync published results from R2
 ```
 
 If invalid model names are provided:

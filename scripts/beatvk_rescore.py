@@ -37,8 +37,10 @@ ONE CPU job:
 
 Run (see the module docstring of `beatvk_vk_arms.py` for the protocol)::
 
-    omnirun submit --backend uni-cpu --gpus 0 --cpus 16 --mem 24 --time 6h \\
-        -- python scripts/beatvk_rescore.py --jobs 8
+    omnirun submit --backend uni-cpu --gpus 0 --cpus 16 --mem 24 --time 6h -- \\
+        bash -c 'export PYTHONPATH="$PWD/src"; python scripts/beatvk_rescore.py --jobs 8 \\
+            && python scripts/r2sync.py push results/beatvk_rescore'
+    python scripts/r2sync.py pull beatvk_rescore   # laptop, afterwards
 
 Restartable: a unit whose ``raw/<unit>.json`` exists is skipped, so a
 re-submission of the same command resumes.
@@ -68,7 +70,7 @@ from rps_refine_lab import cross_window_pool  # noqa: E402
 
 DEFAULT_OUT = Path("results/beatvk_rescore")
 #: Prep caches live OUTSIDE results/ on purpose: they are ~240 MB of
-#: regenerable intermediates and `omnirun pull` copies all of results/**.
+#: regenerable intermediates and `scripts/r2sync.py push results/<dir>` would ship them.
 DEFAULT_PREP_ROOT = Path(".cache/beatvk_rescore_prep")
 CHAINS = ("baseline", "refine_v2", "refine_v3")
 #: Protocol builds a unit can be scored on. `new` = the current pin; `old` =

@@ -40,9 +40,10 @@ That is the form the GPU verification takes, because the frozen ``.npz`` is
 
 Remote (the capture is minutes of CPU, so this is the normal path)::
 
-    omnirun submit --backend apocrita-cpu --gpus 0 --time 2h \\
-        --env PYTHONPATH=src -- \\
-        python scripts/tracking_ref.py --capture results/tracking_ref
+    omnirun submit --backend uni-cpu --gpus 0 --time 2h -- \\
+        bash -c 'export PYTHONPATH="$PWD/src"; python scripts/tracking_ref.py --capture results/tracking_ref \\
+            && python scripts/r2sync.py push results/tracking_ref'
+    python scripts/r2sync.py pull tracking_ref   # laptop, afterwards
 """
 
 from __future__ import annotations
@@ -367,7 +368,8 @@ def bench(
     device choice are measured rather than assumed.
 
     ``out_json`` writes the whole grid as a record — the form the remote
-    bench comes back in (``omnirun pull``).
+    bench comes back in (the job ends with ``python scripts/r2sync.py push
+    <out_json>``; fetch it with ``r2sync.py pull <relpath below results/>``).
     """
     print(f"[bench] channels {channels}, iters {iters}, workers {worker_counts}, {devices}")
     record: dict[str, Any] = {

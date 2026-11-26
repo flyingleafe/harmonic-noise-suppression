@@ -3,7 +3,7 @@ Combined chunkable noise+RPS dataset for training generative models.
 
 Pulls in-flight noise recordings from:
 - DREGON (`in_flight_noise` split, has motor telemetry @ ~929 Hz)
-- Michael's set (`data/new-drone-noises/`, motor telemetry @ ~30 Hz)
+- Michael's set (`dload:new-drone-noises`, motor telemetry @ ~30 Hz)
 
 Each `__getitem__` returns:
   - rps_audio_rate: torch.FloatTensor (4, T)  — RPS upsampled to audio rate, in Hz
@@ -351,9 +351,8 @@ def load_dregon_noise_sources(
     from data_processing.sources.dregon import load_dregon_timeframes
     from data_processing.streams import resolve_source
 
-    dregon_dir = Path(resolve_source(dregon_dir))
     frames = load_dregon_timeframes(
-        dregon_dir.parent,
+        resolve_source(dregon_dir),
         splits=["in_flight_noise"],
         target_sr=sample_rate,
         download=False,

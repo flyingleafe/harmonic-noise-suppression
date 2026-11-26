@@ -1020,6 +1020,20 @@ DIRECT_FACTORY_TYPES: dict[str, str] = {
     "tfgridnet": "models.tfgridnet.build_tfgridnet",
     "mpsenet": "models.mpsenet.build_mpsenet",
     "htdemucs_ft": "models.htdemucs_ft.build_htdemucs_ft",
+    # SE ports of 2026-11 (docs/se-baselines-model-set.md § "Port status").
+    "tflocoformer": "models.tflocoformer.build_tflocoformer",
+    "bsrnn": "models.bsrnn.build_bsrnn",
+    "dpt_fsnet": "models.dpt_fsnet.build_dpt_fsnet",
+    "mpsenet_official": "models.mpsenet_official.build_mpsenet_official",
+    "smolnet": "models.smolnet_se.build_smolnet",
+    "smolnet_t": "models.smolnet_se.build_smolnet_t",
+    "frcrn": "models.frcrn.build_frcrn",
+    "adapter_frcrn": "models.frcrn.build_adapter_frcrn",
+    "drofit": "models.drofit.build_drofit",
+    "droneaudionet": "models.droneaudionet.build_droneaudionet",
+    "cmpdr": "models.cmpdr.build_cmpdr",
+    "storm": "models.storm.build_storm",
+    "flowse": "models.flowse.build_flowse",
 }
 
 

@@ -1,0 +1,36 @@
+# TF-Locoformer, Medium (M) — Saijo, Wichern, Germain, Pan, Le Roux,
+# "TF-Locoformer: Transformer with Local Modeling by Convolution for Speech
+# Separation and Enhancement", IWAENC 2024, arXiv:2408.03440.
+# Upstream: https://github.com/merlresearch/tf-locoformer @ 7a615460 (Apache-2.0),
+# recipe egs2/dns_ins20/enh1/conf/tuning/train_enh_tflocoformer.yaml (16 kHz DNS).
+# 14,973,346 parameters (14,973,314 trainable + 32 fixed RoPE freqs); paper: 15.0M.
+# STFT: n_fft = win = 256 (16 ms), hop 128 (8 ms), periodic Hann, center=True
+# (F = 129); per-utterance std normalisation in and out. Direct complex
+# spectral mapping, one output source. See src/models/tflocoformer.py.
+# Upstream trains this model in fp32 (use_amp: false).
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.tflocoformer.build_tflocoformer
+params:
+  n_fft: 256
+  hop_length: 128
+  normalize_variance: true
+  n_layers: 6
+  emb_dim: 128
+  num_groups: 4
+  n_heads: 4
+  attention_dim: 128
+  ffn_hidden_dim:
+  - 384
+  - 384
+  conv1d_kernel: 4
+  conv1d_shift: 1
+  dropout: 0.0
+  eps: 1.0e-5
+  espnet_xavier_init: true

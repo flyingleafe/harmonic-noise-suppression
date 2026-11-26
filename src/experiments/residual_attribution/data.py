@@ -242,7 +242,7 @@ def rotor_speeds(
             rps_scale_for,
         )
 
-        raw = resolve_raw_root(root / "data/recording_with_motor_speed")
+        raw = resolve_raw_root()
         for wav_rel, csv_rel, offset, dilation in MICHAELS_FILES:
             if Path(csv_rel).stem.upper() != recording_id.upper():
                 continue

@@ -13,8 +13,18 @@ Bucket layout (``bucket`` defaults to ``"ml-data"``, ``prefix`` to
 ``"artifacts"``)::
 
     <bucket>/<prefix>/<experiment_name>/checkpoints/<filename>.ckpt
+    <bucket>/<prefix>/<experiment_name>/checkpoints/{validation_history.jsonl,best_checkpoints.json}
+    <bucket>/<prefix>/<experiment_name>/config.yaml
+    <bucket>/<prefix>/<experiment_name>/val_samples/round_<NNNN>.npz
     <bucket>/<prefix>/<experiment_name>/val_samples/epoch_<N>/<sample_id>__<role>.{wav,png}
     <bucket>/<prefix>/<experiment_name>/val_samples/epoch_<N>/manifest.json
+    <bucket>/<prefix>/<experiment_name>/eval/...
+
+The prefix mirrors the local ``results/`` tree: :func:`publish_results`
+uploads ``results/<name>/<rest>`` to ``<prefix>/<name>/<rest>`` and
+:meth:`ArtifactStore.download_tree` brings it back (CLI:
+``scripts/r2sync.py push|pull``). This is how remote jobs publish results;
+the omnirun output channel carries nothing (``omnirun.toml``).
 
 :class:`ArtifactStore` is deliberately defensive: every public method is a
 no-op (one log line, no exception) when ``enabled=False`` or the R2
@@ -37,9 +47,11 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -51,9 +63,24 @@ import soundfile as sf
 from utils.checkpoints import R2_ENV_VARS, resolve_checkpoint_uri
 from utils.checkpoints import load_r2_env as _load_r2_env
 
-__all__ = ["ArtifactStore", "ValSample", "R2_ENV_VARS", "resolve_checkpoint_uri"]
+__all__ = [
+    "ArtifactStore",
+    "ValSample",
+    "R2_ENV_VARS",
+    "WEIGHT_SUFFIXES",
+    "mirror_store",
+    "publish_results",
+    "resolve_checkpoint_uri",
+]
 
 logger = logging.getLogger(__name__)
+
+#: Never published by :meth:`ArtifactStore.upload_tree`, and skipped by
+#: :meth:`ArtifactStore.download_tree` unless asked: weights travel through
+#: :meth:`ArtifactStore.upload_checkpoint`, W&B run dirs (``wandb/``) sync to W&B.
+WEIGHT_SUFFIXES = (".ckpt", ".pt", ".pth", ".th", ".safetensors")
+_SKIP_DIRS = frozenset({"wandb"})
+_WORKERS = 16
 
 
 @dataclass
@@ -213,6 +240,89 @@ class ArtifactStore:
             return None
         return self._uri(key)
 
+    def upload_tree(self, path: str | Path, subkey: str = "") -> list[str]:
+        """Upload a file, or every file under a directory, below this root.
+
+        A file lands at ``subkey`` (default: its name); a directory's files
+        keep their relative paths below ``subkey``. Weights
+        (:data:`WEIGHT_SUFFIXES`) and ``wandb/`` dirs are skipped — they have
+        their own channels. Returns the uploaded ``r2://`` URIs; a failed file
+        is logged and left out (same defensive contract as :meth:`upload_file`).
+        """
+        src = Path(path)
+        sub = subkey.strip("/")
+        if src.is_file():
+            pairs = [] if src.name.endswith(WEIGHT_SUFFIXES) else [(src, sub or src.name)]
+        else:
+            pairs = []
+            for f in sorted(src.rglob("*")):
+                rel = f.relative_to(src)
+                skipped = f.name.endswith(WEIGHT_SUFFIXES) or _SKIP_DIRS.intersection(rel.parts)
+                if f.is_file() and not skipped:
+                    pairs.append((f, "/".join(p for p in (sub, rel.as_posix()) if p)))
+        if not pairs or not self.active:
+            return []
+        with ThreadPoolExecutor(_WORKERS) as pool:
+            uris = list(pool.map(lambda pair: self.upload_file(*pair), pairs))
+        uploaded = [u for u in uris if u]
+        if len(uploaded) < len(pairs):
+            logger.warning(
+                "ArtifactStore: uploaded only %d of %d files from %s",
+                len(uploaded),
+                len(pairs),
+                src,
+            )
+        return uploaded
+
+    def download_tree(self, subkey: str, dest: str | Path, *, weights: bool = False) -> list[Path]:
+        """Mirror the object ``subkey`` (or every object below it) into ``dest``.
+
+        Weights are skipped unless ``weights``; a file whose size and mtime
+        already match the object is not re-fetched (``aws s3 sync``
+        semantics). Unlike the upload methods this raises — a pull is
+        interactive, and an empty result must not read as "no results".
+        Returns the paths written.
+        """
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError(
+                f"R2 unavailable: artifacts disabled or {', '.join(R2_ENV_VARS)} missing"
+            )
+        root = "/".join(p for p in (self._key_root(), subkey.strip("/")) if p)
+        objects = [
+            o
+            for o in _list_objects(client, self.bucket, root)
+            if (o["Key"] == root or o["Key"].startswith(root + "/"))
+            and (weights or not o["Key"].endswith(WEIGHT_SUFFIXES))
+        ]
+        if not objects:
+            raise FileNotFoundError(f"nothing published at {self._uri(root)}")
+        dest = Path(dest)
+        todo: list[tuple[str, Path, float]] = []
+        for obj in objects:
+            rel = PurePosixPath(obj["Key"][len(root) + 1 :])
+            if ".." in rel.parts:
+                raise ValueError(f"object key escapes {dest}: {obj['Key']}")
+            target = dest.joinpath(*rel.parts)
+            mtime = obj["LastModified"].timestamp()
+            if (
+                target.is_file()
+                and target.stat().st_size == obj["Size"]
+                and int(target.stat().st_mtime) == int(mtime)
+            ):
+                continue
+            todo.append((obj["Key"], target, mtime))
+
+        def fetch(item: tuple[str, Path, float]) -> Path:
+            key, target, mtime = item
+            target.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(self.bucket, key, str(target))
+            os.utime(target, (mtime, mtime))
+            return target
+
+        with ThreadPoolExecutor(_WORKERS) as pool:
+            return list(pool.map(fetch, todo))
+
     def upload_val_samples(self, epoch: int, samples: Sequence[ValSample]) -> str | None:
         """Upload one epoch's validation-sample audio/figures + a manifest.
 
@@ -264,3 +374,42 @@ class ArtifactStore:
             )
             return None
         return self._uri(manifest_key)
+
+
+def _list_objects(client: Any, bucket: str, prefix: str) -> list[dict[str, Any]]:
+    """Every object whose key starts with ``prefix`` (paginated ``list_objects_v2``)."""
+    out: list[dict[str, Any]] = []
+    kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
+    while True:
+        resp = client.list_objects_v2(**kwargs)
+        out.extend(resp.get("Contents") or [])
+        if not resp.get("IsTruncated"):
+            return out
+        kwargs["ContinuationToken"] = resp["NextContinuationToken"]
+
+
+def mirror_store(relpath: str | Path, **store_kwargs: Any) -> tuple[ArtifactStore, str]:
+    """``(store, subkey)`` for ``results/<relpath>``: the first component names
+    the store's experiment, the rest is the key below it."""
+    parts = PurePosixPath(Path(relpath).as_posix()).parts
+    if not parts or ".." in parts:
+        raise ValueError(f"not a path below results/: {relpath!r}")
+    return ArtifactStore(experiment_name=parts[0], **store_kwargs), "/".join(parts[1:])
+
+
+def publish_results(
+    path: str | Path, *, results_root: str | Path = "results", **store_kwargs: Any
+) -> list[str]:
+    """Publish a file or directory under ``results_root`` to its R2 mirror.
+
+    ``<results_root>/<name>/<rest>`` → ``r2://<bucket>/<prefix>/<name>/<rest>``,
+    so ``scripts/r2sync.py pull <name>/<rest>`` restores the same local path.
+    A path outside ``results_root`` is not published (logged). Never raises.
+    """
+    # abspath, not resolve(): worktrees symlink results/ dirs into the main checkout.
+    rel = os.path.relpath(os.path.abspath(path), os.path.abspath(results_root))
+    if rel == "." or rel.split(os.sep)[0] == "..":
+        logger.warning("publish_results: %s is not below %s; not published", path, results_root)
+        return []
+    store, subkey = mirror_store(rel, **store_kwargs)
+    return store.upload_tree(path, subkey)

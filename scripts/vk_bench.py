@@ -36,8 +36,9 @@ not expected; the *regression* reference for future optimization work is this
 run's own output, saved to ``results/vk_bench/<case>_<config>.npz``).
 
 Outputs: ``results/vk_bench/profile_report.json`` + ``profile_report.txt``
-(+ the per-run reference npz files; ``omnirun pull`` brings ``results/**``
-back).
+(+ the per-run reference npz files). A remote run ends its job command with
+``python scripts/r2sync.py push results/vk_bench``; fetch with
+``python scripts/r2sync.py pull vk_bench``.
 
 Modes:
   * default            — all 4 cases x 2 configs, first 20 s.

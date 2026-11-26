@@ -30,14 +30,19 @@ Compute conventions (the user's, not negotiable without asking):
 2. **Run.** A job is the training command; there is no bespoke runner.
    ```bash
    python train.py experiment=<name>                       # local GPU only
-   omnirun submit --backend uni-gpushort --gpus 1 --time 30m --yes -- \
-       python train.py experiment=<name>                   # remote
+   omnirun submit --backend uni-gpushort --gpus 1 --time 30m -- \
+       bash -c 'export PYTHONPATH="$PWD/src"; python train.py experiment=<name>'   # remote
    ```
    Backends (daemon-side; full table in `docs/data-and-artifacts.md` § "Job running"):
    `uni` (Slurm `sae`, long GPU jobs, ≥1 GPU required), `uni-gpushort` (≤1 h),
    `uni-cpu` (CPU-only, `--gpus 0`), `vast` (paid burst when the queue is long),
    `kaggle` (free GPU for CUDA validation). Requires a clean **pushed** HEAD;
-   `.env` ships automatically so dload streaming + wandb work everywhere.
+   `.env` ships automatically so dload streaming + wandb + R2 uploads work everywhere.
+   **No `--outputs`**: omnirun collects nothing (`omnirun.toml`). `train.py`/`eval.py`
+   (and `se_eval.py`/`rps_eval.py`) publish to `r2://ml-data/artifacts/<name>/`
+   themselves; any other script ends the job command with
+   `&& python scripts/r2sync.py push results/<name>` — see
+   `docs/data-and-artifacts.md` § "Job results".
 
 3. **Monitor.** `omnirun ps` · `omnirun status <job>` · `omnirun logs -f <job>` ·
    `omnirun wait <job>`. The CLI is a thin client of the hetzner daemon:
@@ -48,8 +53,10 @@ Compute conventions (the user's, not negotiable without asking):
 4. **Evaluate.** `python eval.py experiment=<name>` (the single eval entry point;
    chain with `&&` after training when the run is short).
 
-5. **Analyze.** Sync first — `omnirun pull <job>` collects `results/**` — then
-   the `generate-model-comparisons` skill or `scripts/table.py`.
+5. **Analyze.** Sync first — `python scripts/r2sync.py pull <name>` mirrors the
+   published `r2://ml-data/artifacts/<name>/` into `results/<name>/` (history at
+   `results/<name>/checkpoints/validation_history.jsonl`; checkpoints via `zoo.load`)
+   — then the `generate-model-comparisons` skill or `scripts/table.py`.
 
 6. **Log.** Add the run to the campaign doc under `docs/experiments/`
    (motivation · setup · results · conclusion) — see `docs/experiments/AGENTS.md`.
@@ -58,7 +65,6 @@ Compute conventions (the user's, not negotiable without asking):
 
 - A crashed run's `results/<exp>` dir persists in the cluster worktree and
   poisons retries at the same SHA (`FileExistsError`) — override `results_root=`.
-- `outputs = results/**` scoops sibling jobs' results into every `omnirun pull`.
 - RPS experiments need `load_rps: true` in the data config.
 - Kaggle kernels have a ~1 MB source cap: strip notebooks/writing/docs from the
   pushed snapshot when it fails to upload.

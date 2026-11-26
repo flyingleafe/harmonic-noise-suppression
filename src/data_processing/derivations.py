@@ -2581,6 +2581,11 @@ ARTEFACT_PINS = {
         "posterior), published by scripts/rps_traj_publish_fits.py and read by "
         "rps.kind: fitted_traj"
     ),
+    "se-pretrained": (
+        "third-party pretrained weights for the SE-baseline ports (bsrnn, droneaudionet, "
+        "frcrn, mpsenet_official, tflocoformer; docs/se-baselines-model-set.md); "
+        "materialized locally behind the .cache/pretrained symlink"
+    ),
     **{
         name: (
             "a noise-model preset bank (rig-parameter draws) read by the matching "

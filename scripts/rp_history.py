@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Tabulate the validation rounds of rp_* runs (docs/experiments/paper-real-protocol.md).
 
-Reads ``results/<experiment>/validation_history.jsonl`` (pulled with ``omnirun
-pull``) and prints one row per round: optimizer step, LR, the control score
+Reads ``results/<experiment>/checkpoints/validation_history.jsonl`` (the R2
+mirror layout: ``python scripts/r2sync.py pull <experiment>/checkpoints``) and
+prints one row per round: optimizer step, LR, the control score
 (``real_macro``), its 5-round median, the per-dataset views and the stop verdict.
 ``--best`` prints only the best-median round per run, next to the stopping
 step, which is what the result tables quote.
@@ -33,7 +34,7 @@ VIEWS = (
 
 
 def rounds(experiment: str) -> list[dict]:
-    path = REPO_ROOT / "results" / experiment / "validation_history.jsonl"
+    path = REPO_ROOT / "results" / experiment / "checkpoints" / "validation_history.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

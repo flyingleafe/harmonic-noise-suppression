@@ -28,9 +28,9 @@ import soundfile as sf
 ROOT = Path(__file__).resolve().parents[2]  # this checkout (code)
 sys.path.insert(0, str(ROOT / "src"))
 
-from utils.paths import get_data_path  # noqa: E402
+from data_processing.streams import resolve_source  # noqa: E402
 
-DREGON = get_data_path("DREGON")
+DREGON = Path(resolve_source("dload:DREGON"))
 
 MEASURED = "motors_measured"
 COMMAND = "motors_command"

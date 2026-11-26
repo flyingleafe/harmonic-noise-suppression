@@ -180,26 +180,10 @@ def test_multichannel_still_uses_the_mic_dim(tmp_path):
 # ─── real data ───────────────────────────────────────────────────────────────
 
 
-def _raw_root():
-    from pathlib import Path
-
-    for candidate in (Path("data/new-drone-noises"), Path("data")):
-        if (candidate / "FLY103.csv").exists():
-            return candidate
-        if (candidate / "new-drone-noises" / "FLY103.csv").exists():
-            return candidate / "new-drone-noises"
-    return None
-
-
-REAL_ROOT = _raw_root()
-needs_raw = pytest.mark.skipif(REAL_ROOT is None, reason="data/new-drone-noises not present")
-
-
-@needs_raw
 @pytest.mark.parametrize("rid", sorted(EXPECTED))
-def test_real_csv_has_four_motor_channels(rid):
-    assert REAL_ROOT is not None
-    t_log, rps = michaels.read_motor_speeds(REAL_ROOT / EXPECTED[rid][1])
+def test_real_csv_has_four_motor_channels(rid, dload_tree):
+    root = dload_tree("new-drone-noises")
+    t_log, rps = michaels.read_motor_speeds(root / EXPECTED[rid][1])
     assert rps.shape[0] == 4
     assert len(t_log) == rps.shape[1] > 3000
     finite = rps[:, np.isfinite(rps).all(axis=0)]
@@ -208,10 +192,8 @@ def test_real_csv_has_four_motor_channels(rid):
     assert t_log[-1] - t_log[0] > 150.0  # the log outlasts the audio
 
 
-@needs_raw
-def test_build_test_yields_two_mono_frames():
-    assert REAL_ROOT is not None
-    frames = dict(michaels.build_test(REAL_ROOT))
+def test_build_test_yields_two_mono_frames(dload_tree):
+    frames = dict(michaels.build_test(dload_tree("new-drone-noises")))
     assert set(frames) == set(EXPECTED)
     for rid, expected_dur in (("FLY103", 106.48), ("FLY108", 99.44)):
         frame = frames[rid]

@@ -129,6 +129,7 @@ params: {model_type: dcunet, config: {...}}
 | MP-SENet | `conf/model/f1_mpsenet.yaml` | Trains **fp32** — bf16 NaN-poisons |
 | SGMSE+ | `conf/model/f1_sgmse.yaml` | Score-based diffusion |
 | HTDemucs | `conf/model/f1_htdemucs.yaml` | Fine-tuned from the Meta checkpoint |
+| BSRNN, TF-Locoformer, DPT-FSNet, MP-SENet (official release), SMoLnet, SMoLnet-T, FRCRN + adapters, DroFiT, DroneAudioNet, cMPDR + DNN, StoRM, FlowSE | `conf/model/{bsrnn,tflocoformer,dpt_fsnet,mpsenet_official,smolnet,smolnet_t,frcrn,adapter_frcrn,drofit,droneaudionet,cmpdr_*,storm,flowse}.yaml` | Ports of 2026-11; parameter counts, parity and weights in `docs/se-baselines-model-set.md` § "Port status" |
 
 ## Evaluation
 

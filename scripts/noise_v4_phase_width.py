@@ -20,9 +20,10 @@ default output so a later full run does not skip it::
 
 Cluster (one recording takes 2-5 min on one core; ~1.5 GB per worker)::
 
-    omnirun submit --backend uni-cpu --gpus 0 --cpus 16 --mem 48 --time 1h \\
-        --outputs 'results/noise_v4/phase_width/**' -- \\
-        bash -c 'export PYTHONPATH="$PWD/src"; python scripts/noise_v4_phase_width.py run --jobs 10'
+    omnirun submit --backend uni-cpu --gpus 0 --cpus 16 --mem 48 --time 1h -- \\
+        bash -c 'export PYTHONPATH="$PWD/src"; python scripts/noise_v4_phase_width.py run --jobs 10 \\
+            && python scripts/r2sync.py push results/noise_v4/phase_width'
+    python scripts/r2sync.py pull noise_v4/phase_width   # laptop, afterwards
 """
 
 from __future__ import annotations

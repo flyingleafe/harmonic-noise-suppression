@@ -1180,9 +1180,12 @@ def read_daset(limit: int | None, daset_dir: Path) -> Iterator[tuple[dict, np.nd
                     return
 
 
-def read_drone_audio(limit: int | None, root: Path) -> Iterator[tuple[dict, np.ndarray, int]]:
+def read_drone_audio(limit: int | None, root: str | Path) -> Iterator[tuple[dict, np.ndarray, int]]:
     import soundfile as sf
 
+    from data_processing.streams import resolve_source
+
+    root = Path(resolve_source(root))
     files = sorted((root / "Binary_Drone_Audio" / "yes_drone").glob("*.wav"))
     if not files:
         raise SystemExit(f"no yes_drone wavs under {root}")
@@ -1213,9 +1216,12 @@ def read_drone_audio(limit: int | None, root: Path) -> Iterator[tuple[dict, np.n
                 return
 
 
-def read_zenodo(limit: int | None, root: Path) -> Iterator[tuple[dict, np.ndarray, int]]:
+def read_zenodo(limit: int | None, root: str | Path) -> Iterator[tuple[dict, np.ndarray, int]]:
     import soundfile as sf
 
+    from data_processing.streams import resolve_source
+
+    root = Path(resolve_source(root))
     files = sorted((root / "raw").rglob("*.wav"))
     if not files:
         raise SystemExit(f"no wavs under {root}/raw")
@@ -1657,8 +1663,14 @@ def main(argv: list[str] | None = None) -> int:
         help="second copy of every figure",
     )
     ap.add_argument("--daset-dir", type=Path, default=_ROOT / ".cache/source_raw/noise_v2/daset")
-    ap.add_argument("--drone-audio-dir", type=Path, default=_ROOT / "data/drone_audio")
-    ap.add_argument("--zenodo-dir", type=Path, default=_ROOT / "data/zenodo_drone_noises")
+    ap.add_argument(
+        "--drone-audio-dir", default="dload:drone_audio", help="path or dload:drone_audio"
+    )
+    ap.add_argument(
+        "--zenodo-dir",
+        default="dload:zenodo_drone_noises",
+        help="path or dload:zenodo_drone_noises",
+    )
     ap.add_argument(
         "--chums-mat",
         type=Path,

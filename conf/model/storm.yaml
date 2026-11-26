@@ -1,0 +1,51 @@
+# StoRM — Lemercier, Richter, Welker, Gerkmann, "StoRM: A Diffusion-based
+# Stochastic Regeneration Model for Speech Enhancement and Dereverberation",
+# IEEE/ACM TASLP 31, 2023 (arXiv:2212.11851). Upstream: github.com/sp-uhh/storm
+# @257e9636 (MIT). See src/models/storm/model.py.
+# Predictor D(y): NCSN++M, discriminative (27,342,350 params); score network
+# s(x_t, [y, D(y)], t): NCSN++M (27,776,038 params; paper "roughly 27.8M");
+# 55,118,388 in total, measured, = upstream and the published checkpoint (+ the
+# same again as EMA buffers in the state_dict). Native 16 kHz, no resampling.
+# STFT n_fft=510, hop=128, periodic Hann (the published checkpoint's setting;
+# the paper says sqrt-Hann), center=True -> 256 bins; compression
+# 0.33 * |X|^0.5. OUVE SDE theta=1.5, sigma 0.05..0.5, t_eps=0.03.
+# forward(mix, target) -> upstream joint loss 0.5*L_pred + 0.5*L_DSM (summed over
+# batch); forward(mix) -> predictor + PC sampler (N=50, 1 ALD step, r=0.5).
+# Upstream trains on 256-frame segments = 32640 samples (2.04 s).
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.storm.build_storm
+params:
+  n_fft: 510
+  hop_length: 128
+  window: hann
+  spec_factor: 0.33
+  spec_abs_exponent: 0.5
+  theta: 1.5
+  sigma_min: 0.05
+  sigma_max: 0.5
+  t_eps: 0.03
+  backbone:            # NCSN++M (upstream --backbone ncsnpp defaults)
+    nf: 128
+    ch_mult: [1, 2, 2, 2]
+    num_res_blocks: 1
+    attn_resolutions: [0]   # attention only in the bottleneck
+    fourier_scale: 16
+    image_size: 256
+    centered: false
+    dropout: 0.0
+  condition: both            # score net sees [x_t, y, D(y)]
+  mode: regen-joint-training # or denoiser-only (stage-1 pre-training), regen-freeze-denoiser
+  weighting_denoiser_to_score: 0.5
+  ema_decay: 0.999
+  use_ema: true
+  sampler_steps: 50
+  corrector: ald
+  corrector_steps: 1
+  snr: 0.5

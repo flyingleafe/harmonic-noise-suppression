@@ -339,6 +339,39 @@ REGISTRY: dict[str, SourceDataset] = {
             },
             raw_dataset="zenodo_drone_noises",
         ),
+        SourceDataset(
+            name="UOEMD-VAFCVS",
+            provenance={
+                "source_url": "https://data.mendeley.com/datasets/msxs4vj48g/2",
+                "doi": "10.17632/msxs4vj48g.2",
+                "license": "CC BY 4.0",
+                "citation": (
+                    "Sehri & Dumond, University of Ottawa constant and variable speed "
+                    "electric motor vibration and acoustic fault signature dataset, "
+                    "Data in Brief 53 (2024) 110144."
+                ),
+                "description": (
+                    "Induction-motor vibration + acoustic fault signatures, unloaded/"
+                    "loaded, constant/variable speed (Mendeley v2, 257 files): "
+                    "1_Time/, 2_CSV_Data_Files/, 3_MatLab_Data_Files/."
+                ),
+            },
+            raw_dataset="UOEMD-VAFCVS",
+        ),
+        SourceDataset(
+            name="AuDroK",
+            provenance={
+                "source_url": "https://mobilithek.info/offers/605778370199691264",
+                "publisher": "H2Think gGmbH (mFUND project AuDroK)",
+                "description": (
+                    "AUDROK drone sound data, all seven Mobilithek distributions: "
+                    "Measurements_{1-19,20-39,40-59,60-79}/ (XML containers, each a "
+                    "base64-encoded WAV), Dresden-II-S-{A,B}/ (outdoor WAVs) and "
+                    "Angebotsbeschreibung.xml (the offer's database description)."
+                ),
+            },
+            raw_dataset="AuDroK",
+        ),
     )
 }
 

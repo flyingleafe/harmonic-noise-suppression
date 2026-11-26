@@ -1,0 +1,43 @@
+# FRCRN + frequency-axis bottleneck adapters ("Monaural Speech Enhancement on
+# Drone via Adapter Based Transfer Learning", Chen, Bi, Lai, Ma, IWAENC 2024,
+# arXiv:2405.10022). No public adapter code: re-implemented from the paper
+# (src/models/frcrn/model.py). Backbone = the released ModelScope FRCRN
+# damo/speech_frcrn_ans_cirm_16k (Zhao et al., ICASSP 2022, arXiv:2206.07293),
+# code adapted from github.com/modelscope/modelscope@987d79f0 (Apache-2.0),
+# src/models/frcrn/backbone.py.
+# Params: 14,030,220 total = backbone 13,963,604 (13,141,844 learnable +
+# 821,760 fixed STFT/iSTFT kernels) + 66,616 adapters (one after each of the 7
+# encoder blocks of the first U-Net; adapt_unet2: true adds 66,616 more).
+# Trainable with the frozen backbone: 287,096 = adapters + every SE "attention
+# block" of both U-Nets (220,480); paper Table 2: "0.3 M". Why the first U-Net
+# only: see "Which U-Net(s)" in src/models/frcrn/model.py.
+# STFT: 640-pt sqrt-Hann window (40 ms), hop 320 (20 ms), 640-pt FFT -> 321
+# bins, un-centred; input normalised to -25 dBFS (ModelScope audio_norm) and
+# the output rescaled back to the input level.
+# Checkpoint: the paper starts from the pretrained FRCRN. The ModelScope
+# pytorch_model.bin (58 MB, Apache-2.0, sha256 477a2f82...d79fd612, from
+# https://modelscope.cn/models/damo/speech_frcrn_ans_cirm_16k) lives locally at
+# .cache/pretrained/frcrn/pytorch_model.bin; set params.checkpoint to that path
+# (or to an r2:// URI, resolved by utils.checkpoints.resolve_checkpoint_uri).
+# It is NOT on R2 yet: cluster jobs need it staged there first. null = random
+# backbone (tests only; adapter tuning without the checkpoint is meaningless).
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.frcrn.build_adapter_frcrn
+params:
+  checkpoint: null
+  freeze_backbone: true
+  train_attention: true
+  adapter_init: zero_up
+  adapt_unet2: false
+  input_norm: true
+  win_len: 640
+  win_inc: 320
+  fft_len: 640
+  win_type: hann

@@ -644,7 +644,7 @@ def main() -> None:
     ap.add_argument("--jobs", type=int, default=4, help="parallel worker processes")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--dataset-version", default=None, help="beatvk-valid-raw version override")
-    ap.add_argument("--dregon-dir", default="data/DREGON", help="path or dload:DREGON (geometry)")
+    ap.add_argument("--dregon-dir", default="dload:DREGON", help="path or dload:DREGON (geometry)")
     ap.add_argument("--channels", type=int, default=8, help="audio channels used (<=8)")
     ap.add_argument("--device", default=None, help="cuda|cpu for neural forwards (default: auto)")
     ap.add_argument("--batch", type=int, default=16, help="neural inference batch")

@@ -1,0 +1,38 @@
+# DroneAudioNet — AudioSep's text-queried ResUNet30 fine-tuned as a drone-noise
+# estimator; enhanced = mixture - drone estimate. Paper: Gupta, Ramesh, Luo,
+# Nanayakkara, "DroneAudioNet: Noise Suppression for Drone Audition-based Search
+# and Rescue", arXiv:2608.00875. Upstream: github.com/DroneAudioNet/DroneAudioNet-Code
+# @b2b2fc6f (NO licence: residual head re-implemented from the paper); trunk from
+# github.com/Audio-AGI/AudioSep @944583f1 (MIT). The frozen CLAP text query
+# ("Drone motor and propeller sounds") is a stored (512,) embedding buffer.
+# Parameters: 26,448,042, all trainable (paper App. A.2: 26.4M trainable; its 238M
+# total adds the frozen CLAP encoder and torchlibrosa DFT kernels, absent here).
+# Native rate 32 kHz: 16 kHz input is resampled to 32 kHz inside the model and the
+# drone estimate back to 16 kHz. STFT @ 32 kHz: periodic Hann, n_fft = win = 2048,
+# hop = 320, center=True (reflect), F = 1025 (1024 into the U-Net).
+# Pretrained weights (optional, set `checkpoint:`), both downloaded locally:
+#   .cache/pretrained/droneaudionet/audiosep_base_4M_steps.ckpt — AudioSep base, the
+#     paper's fine-tuning start (head warm-started: rows 3..5 Xavier, alpha=beta=1);
+#     huggingface.co/spaces/Audio-AGI/AudioSep (checkpoint/), 1.26 GB.
+#   .cache/pretrained/droneaudionet/droneaudionet.ckpt — the authors' fine-tuned
+#     model (loaded verbatim); Google Drive folder linked in the upstream README, 1.26 GB.
+# Cluster jobs need the chosen file staged (e.g. on R2 as an r2:// URI) first.
+# See src/models/droneaudionet/model.py.
+task: speech_enhancement
+task_params:
+  n_channels: null
+  use_rps: false
+  predict_rps: false
+  sr:
+  - 16000
+  - 1
+_target_: models.droneaudionet.build_droneaudionet
+params:
+  checkpoint: null
+  sample_rate: 16000
+  native_sample_rate: 32000
+  channels: [32, 32, 64, 128, 256, 384, 384]
+  n_fft: 2048
+  hop_length: 320
+  momentum: 0.01
+  condition_size: 512

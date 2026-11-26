@@ -22,6 +22,10 @@ gate every later RPS-informed claim.
 
 ## Architecture set (5 + anchors)
 
+> **Superseded 2026-11-25** by `docs/se-baselines-model-set.md` (19 models).
+> The table and the "ruled out" paragraph below are the July 2026 set, kept as
+> the record of what the F1 batch ran.
+
 | # | Model | Family | Source | Notes |
 |---|---|---|---|---|
 | 1 | Edge-BS-RoFormer | band-split transformer | in repo (Paper 1) | current in-house SOTA on DN-LM |

@@ -553,7 +553,7 @@ def main() -> None:
     ap.add_argument("--recordings", default="", help="comma subset (default: all 4)")
     ap.add_argument("--windows", default="", help="comma window indices (default: all)")
     ap.add_argument("--dataset-version", default=None)
-    ap.add_argument("--dregon-dir", default="data/DREGON")
+    ap.add_argument("--dregon-dir", default="dload:DREGON", help="path or dload:DREGON (geometry)")
     ap.add_argument("--traces", default=DEFAULT_TRACES, help="'<rid>:<widx>,...' trace windows")
     ap.add_argument(
         "--init-arm",

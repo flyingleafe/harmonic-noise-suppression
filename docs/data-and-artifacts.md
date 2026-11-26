@@ -1,4 +1,4 @@
-# Data & Artifacts — R2 via dload + wandb Artifacts
+# Data & Artifacts — R2 via dload + ArtifactStore
 
 Single page. Read once, bookmark, move on.
 
@@ -7,9 +7,11 @@ Single page. Read once, bookmark, move on.
 | Thing                | Tool              | Where                                   |
 |----------------------|-------------------|-----------------------------------------|
 | Datasets (raw/processed) | **dload** (PyPI `dload-ml`) + R2 remote | `s3://ml-data-new/` + `dload.toml`/`dload.lock` in git |
-| Checkpoints          | **wandb Artifacts** | wandb servers, linked to the training run |
-| Metrics / logs / run metadata | wandb (already in use) | wandb |
-| Eval audio samples   | local `results/<job>/eval/`; push to wandb or R2 manually if needed | |
+| Checkpoints          | `ArtifactStore` (training loop) | `s3://ml-data/artifacts/<exp>/checkpoints/`; `zoo.load` resolves them |
+| Metrics / logs       | wandb | wandb (summary carries the `r2/*` URIs) |
+| Run records (resolved config, validation history, best index, val-round arrays) | `ArtifactStore` (training loop) | `s3://ml-data/artifacts/<exp>/` — § "Training artifacts" |
+| Eval outputs, any other job result | `ArtifactStore` (`eval.py`, `se_eval.py`, `rps_eval.py`, `scripts/r2sync.py push`) | `s3://ml-data/artifacts/<name>/` mirroring `results/<name>/` — § "Job results" |
+| omnirun job outputs  | **nothing** (`omnirun.toml`: `outputs = []`) | — |
 
 One bucket (`ml-data-new`), one Cloudflare account. The remote endpoint and
 bucket are committed in `dload.toml`; per-dataset version pins live in
@@ -195,29 +197,16 @@ Measured on the V4 stream (laptop ↔ R2): cold time-to-first-sample ~6 s per
 shard, warm epochs ~18× faster than cold, ~48 MB/s sustained download;
 bounded-budget cache eviction verified working.
 
-At training end, the best checkpoint is automatically logged as a wandb
-artifact (aliased `best` and `latest`).
+Checkpoints and run records upload to R2 as training goes (§ "Training
+artifacts"); there is no W&B checkpoint artifact.
 
 ### Evening on laptop — analyze
 
 ```bash
-# Pull the dataset (only needed if you want to inspect raw data locally).
 git pull
-dload pull DREGON-LM
-
-# Pull trained checkpoints from wandb (cached by wandb under ~/.cache/wandb).
-python -c "
-import wandb
-api = wandb.Api()
-for run_id in ['abc123', 'def456']:
-    art = api.artifact(f'flyingleafe/harmonic-noise-suppression/model-{run_id}:best')
-    print(run_id, '→', art.download())
-"
-
-# Or, programmatically inside a notebook:
-# run = wandb.init(...)
-# art = run.use_artifact('flyingleafe/harmonic-noise-suppression/model-abc123:best')
-# ckpt_path = Path(art.download()) / 'best_model.ckpt'
+dload pull DREGON-LM                        # only to inspect raw data locally
+python scripts/r2sync.py pull <exp>         # run records + eval outputs -> results/<exp>/
+python -c "import zoo; fm = zoo.load('<exp>')"   # a checkpoint as a Frame -> Frame model
 ```
 
 ## Disk management
@@ -272,7 +261,8 @@ Backends as configured on the daemon:
 | `kaggle` | Kaggle free GPU quota — CUDA validation of new code without waiting for the queue; ~1 MB kernel source cap |
 
 The committed repo-level `omnirun.toml` holds job *defaults* only
-(`outputs = results/**`, 1 GPU, 1 h, `env kind = uv`).
+(`outputs = []` — collect nothing, see § "Job results"; 1 GPU, 1 h,
+`env kind = uv`).
 
 ```bash
 omnirun submit --backend uni-gpushort --gpus 1 --time 30m --name <name> -- \
@@ -281,15 +271,15 @@ omnirun ps                    # in-flight + recent jobs (-A: all repos)
 omnirun status <job>          # one job (unique id prefix is enough)
 omnirun logs -f <job>         # stream logs (there is no --tail)
 omnirun wait <job>            # block until a state is reached
-omnirun pull <job>            # collect the job's results/** locally
+python scripts/r2sync.py pull <name>  # fetch published results (§ "Job results")
 omnirun cancel <job>          # graceful; --force hard-kills
 omnirun offers --gpus 1       # probe backends, submit nothing
 omnirun backends check        # re-establish the SSH ControlMaster after expiry
 ```
 
 - `omnirun ssh <job>` is **not available in daemon mode**; marketplace
-  backends have no ssh entry at all. Inspect a running job through its logs
-  and `results/**`, not by shelling in.
+  backends have no ssh entry at all. Inspect a running job through its logs,
+  W&B and what it has published to R2, not by shelling in.
 
 - **Always `export PYTHONPATH="$PWD/src"`** in the submitted command: the
   remote `.venv` is shared by every omnirun worktree and its editable
@@ -342,15 +332,6 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   `TAP_CONV_TORCH=1` like the V100s (P100 is sm_60). `uni-cpu` is the
   better home for a single-checkpoint panel eval (~15 min at 8 threads).
 
-- `omnirun pull` ships the job's whole `results/**` unless the job was
-  submitted with `--outputs '<glob>'`; the full tree (~7.7k files) exceeds
-  the client's 60 s read timeout. Submit with `--outputs 'results/<exp>/**'`,
-  or pull through `omnirun.client.RemoteClient("http://10.100.0.1:8787",
-  timeout=900).pull(client.resolve_job(<id>), <dest>)`. The collected outputs
-  live in the daemon's R2 bucket `omnirun-artifacts` under `<job_id>/outputs/`
-  (hetzner `/home/omnirun/artifacts/<job_id>/` keeps only the log); the `.env`
-  R2 credentials read it with boto3 at that endpoint (2026-10-23, 469 MB in 15 s).
-
 - Requires a **clean, pushed HEAD** (`--push`/`--dirty` exist; prefer clean —
   `train.py` errors on a dirty tree anyway).
 - On the cluster each job runs in a shared worktree
@@ -370,30 +351,76 @@ omnirun backends check        # re-establish the SSH ControlMaster after expiry
   # then locally, once it succeeds: pull the new versions from R2 into the lock
   dload pin DN-LM-train && dload pin DN-LM-valid && git add dload.lock
   ```
-- Shared same-SHA worktree warts: a crashed run's `results/<exp>` dir
+- Shared same-SHA worktree wart: a crashed run's `results/<exp>` dir
   persists in the worktree and **poisons retries at the same SHA**
-  (`FileExistsError`) — work around with a `results_root=...` override. Also
-  `outputs = results/**` scoops *sibling* jobs' results dirs into every
-  `omnirun pull`.
+  (`FileExistsError`) — work around with a `results_root=...` override.
 - After the local SSH ControlMaster dies, jobs show **LOST** from stale
   heartbeats — run `omnirun backends check` and verify via `sacct` on the
-  cluster; a completed job may stay "lost" in `omnirun ps` while
-  `omnirun pull` still works.
+  cluster; a completed job may stay "lost" in `omnirun ps` while its
+  published results are complete.
 - The legacy helpers `scripts/sbatch.sh` / `scripts/sync_results.sh` were
   retired in the 2026-08 refactor (git history keeps them). Use omnirun for
-  submission and `omnirun pull` for results.
+  submission and `scripts/r2sync.py` for results.
+
+## Job results (explicit publishing; omnirun collects nothing)
+
+omnirun ships a job's files back only through its output globs — the repo
+default `[job] outputs` in `omnirun.toml`, *replaced* (not extended) by a
+non-empty `--outputs`; no exclude globs — plus whatever the job writes to
+`$OMNIRUN_OUTPUT`. The daemon stores them under the job id in the bucket
+`omnirun-artifacts` (`<job_id>/outputs/<relpath>`). Job-namespaced, that
+channel re-shipped the shared worktree's sibling `results/` dirs with every
+job and duplicated checkpoints the training loop had already uploaded
+(2026-11: 356 GB, ~250 GB of it repeat copies). So the default is
+`outputs = []`: **never pass `--outputs`, never write to `$OMNIRUN_OUTPUT`**;
+results leave a job only by explicit upload through `ArtifactStore`.
+
+Mirror rule (`training.artifacts.publish_results`): `results/<name>/<rest>`
+⇄ `s3://ml-data/artifacts/<name>/<rest>`, so a pull restores the path its
+producer wrote.
+
+| Producer | Publishes | R2 key below `artifacts/` |
+|---|---|---|
+| `train.py` | resolved config, checkpoints, validation history, best index, val-round arrays | `<exp>/` — § "Training artifacts" |
+| `eval.py` | `metrics.json`, `per_sample.csv`, `per_snr.csv` | `<exp>/eval/` |
+| `scripts/se_eval.py` | its CSV (when written below `results/`) | `se_eval/<file>.csv` |
+| `scripts/rps_eval.py` | `report.json`, `per_window.csv` | `rps_eval/<tag>/` |
+| any other script | `python scripts/r2sync.py push results/<name>[/<sub>]` at the end of the job command | `<name>[/<sub>]/` |
+
+```bash
+# a campaign/analysis job: compute, then publish its own subtree
+omnirun submit --backend uni-cpu --gpus 0 --time 2h -- bash -c \
+  'export PYTHONPATH="$PWD/src"; python scripts/<campaign>.py --out results/<campaign>/<run> \
+   && python scripts/r2sync.py push results/<campaign>/<run>'
+# laptop: fetch (incremental — size+mtime, like `aws s3 sync`)
+python scripts/r2sync.py pull <name>[/<sub>] ...     # -> results/<name>[/<sub>]
+python scripts/r2sync.py pull <exp> --weights        # checkpoints too (usually: zoo.load)
+```
+
+- Push a run's own subdirectory, never `results/` itself (refused): sibling
+  jobs share the worktree. Weights (`*.ckpt`, `*.pt`, …) and `wandb/` dirs
+  are skipped; push exits 1 when it uploaded nothing (missing creds, empty
+  dir), so the job fails visibly instead of silently losing its results.
+- After a pull, training's history and best index sit at
+  `results/<exp>/checkpoints/{validation_history.jsonl,best_checkpoints.json}`
+  (their R2 keys), not at the run-dir root.
+- Jobs from before 2026-11-26 captured `results/**`; `omnirun pull <job>`
+  still reads what remains of `omnirun-artifacts/<job_id>/outputs/`.
 
 ## Training artifacts (checkpoints + val samples) → R2
 
-Since the unified `train.py`, checkpoints **and** a selection of validation
-samples (audio + figures) also upload directly to the Cloudflare R2 bucket
-`ml-data`, in addition to the wandb-artifact checkpoint flow above. This is
-handled by `src/training/artifacts.py::ArtifactStore` — not dload, and not the
-`dload pull`/`wandb.use_artifact` flow described above.
+Since the unified `train.py`, checkpoints **and** the run records upload
+directly to the Cloudflare R2 bucket `ml-data` as training goes — the only
+copy that leaves the job besides W&B. This is handled by
+`src/training/artifacts.py::ArtifactStore` — not dload, not W&B artifacts.
 
-- **Where**: `s3://ml-data/artifacts/<experiment_name>/checkpoints/<filename>.ckpt`
-  and `s3://ml-data/artifacts/<experiment_name>/val_samples/epoch_<N>/...`
-  (`bucket`/`prefix` are configurable; defaults are `ml-data`/`artifacts`).
+- **Where** (`s3://ml-data/artifacts/<experiment_name>/`; `bucket`/`prefix`
+  configurable, defaults `ml-data`/`artifacts`): `config.yaml` (resolved
+  Hydra config, at start); `checkpoints/{last.ckpt,train_state.pt,
+  validation_history.jsonl}` every round; `checkpoints/best_<score>_<kind>.ckpt`
+  (server-side copies), `checkpoints/best_checkpoints.json` and
+  `val_samples/round_<NNNN>.npz` on rounds where a best moved;
+  `val_samples/epoch_<N>/` (on-demand media); `eval/` (`eval.py`).
 - **Client**: `boto3.client("s3")` (same library dload uses; boto3 is a
   direct project dependency) pointed at the same R2 S3-compatible endpoint
   used by dload (`https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com`).

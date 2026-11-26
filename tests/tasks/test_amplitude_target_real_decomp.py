@@ -12,7 +12,7 @@ and runs the whole seam:
                        -> codec.to_frame -> AmplitudeTargetLoss
 
 It is skipped when the artifacts are not on this machine (they are gitignored
-job outputs, and the DREGON geometry comes from the dload cache).
+job outputs) or when ``dload:DREGON`` (the geometry) cannot be resolved.
 """
 
 from __future__ import annotations
@@ -54,24 +54,12 @@ def _decomp_dir() -> Path:
     pytest.skip(f"no local decomposition artifacts (looked in {[str(c) for c in candidates]})")
 
 
-def _dregon_geometry() -> tuple[np.ndarray, np.ndarray]:
-    """The corrected DREGON array geometry, from the local raw tree."""
-    from data_processing.sources.dregon import get_geometry
-
-    roots = list((Path.home() / ".cache/dload/materialized/DREGON").glob("*")) + [
-        REPO / "data" / "DREGON"
-    ]
-    for root in roots:
-        if (root / "micPos.txt").exists() or (root / "coordinates.mat").exists():
-            return get_geometry(root)
-    pytest.skip("no local DREGON tree for the array geometry")
-
-
-def _record() -> dict:
+def _record(dload_tree) -> dict:
     """One real decomposed chunk, in ``DecompFrameDataset``'s record layout."""
     from scipy.signal import resample_poly
 
     from data_processing.derivations import _decomp_to_audio_grid, dense_envelopes
+    from data_processing.sources.dregon import get_geometry
 
     root = _decomp_dir() / RECORDING
     report = json.loads((root / "report.json").read_text())
@@ -107,7 +95,7 @@ def _record() -> dict:
     # makes an index cut of both stay aligned.
     assert abs(n_env * STRIDE - (a1 - a0)) < STRIDE
 
-    mic_pos, rotor_pos = _dregon_geometry()
+    mic_pos, rotor_pos = get_geometry(dload_tree("DREGON"))
     n_t = min(residual.shape[-1], n_env * STRIDE)
     return {
         "recording_id": report["recording_id"],
@@ -125,8 +113,8 @@ def _record() -> dict:
 
 
 @pytest.fixture(scope="module")
-def real_record() -> dict:
-    return _record()
+def real_record(dload_tree) -> dict:
+    return _record(dload_tree)
 
 
 def test_the_published_artifacts_have_the_layout_the_loader_assumes(real_record):
