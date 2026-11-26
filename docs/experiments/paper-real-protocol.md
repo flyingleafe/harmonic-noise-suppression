@@ -752,11 +752,16 @@ reconstruction choices: `src/tasks/rps-prediction/AGENTS.md`.
 | `rp_marcoux_grondin_all` | `all` | batch 128 × 1, max LR 1e-3 (the paper states none; the regressor rows' value), `rps` metrics |
 | `rp_marcoux_grondin_alllab` | `alllab` | same |
 
-Both submitted 2026-11-26 to `isambard` (one GH200, 16 cores, 96 GB) at
-`83ee20d3`: omnirun `rp-marcoux-grondin-all-15e39d` and
-`rp-marcoux-grondin-allla-43fd03`. Everything else as the other `rp_*` rows;
-the Table IV cells are read at the lowest five-round median of `real_macro`
-(`scripts/rp_history.py --best`).
+First submission 2026-11-26 at `83ee20d3` (`rp-marcoux-grondin-all-15e39d`,
+`rp-marcoux-grondin-allla-43fd03`): both stopped non-finite at step 500,
+before any checkpoint. Training audio reaches 1.1e5 STFT bin power (2 of 512
+`rp_all` items), past fp16's 65504, so the autocast mel matmul returned inf and
+NaN entered the BatchNorm running stats. Fixed in `ecbd0179` (front end in
+fp32; the largest training mel value, 6964, then reaches the fp16 conv
+safely). Resubmitted to `isambard` (one GH200, 16 cores, 96 GB):
+`rp-marcoux-grondin-all-1741a6` and `rp-marcoux-grondin-allla-7f7596`.
+Everything else as the other `rp_*` rows; the Table IV cells are read at the
+lowest five-round median of `real_macro` (`scripts/rp_history.py --best`).
 
 ## Implementation notes (for the cutover)
 
