@@ -1153,6 +1153,30 @@ and its `best_real_macro_median` round is step 3000 with `real_macro` 2.51
 (§ "Easy setup"). The test split is not scored for either seed. Checkpoints are
 under `r2://ml-data/artifacts/rp_harmof0_l2_easyv4_ft_lr5e4_s1/`.
 
+## Marcoux–Grondin baseline in the grid (2026-11-27)
+
+The Marcoux & Grondin CRNN (four-track activity-gated adaptation
+`marcoux_grondin_rps4`; `paper-real-protocol.md` § "Marcoux–Grondin baseline
+rows") through the same grid as the other baselines: easy and hard
+pretraining, easy and hard mixed training, and three fine-tuning seeds after
+each pretraining (seeds 1 and 2 with stream seeds 20261015/20261016, as the
+chain rows). Configs `rp_marcoux_grondin_{easyv4,priorv4}{,_mixlab,_ft_lr5e4}`
+copy the `rp_scv2_*` ones with the model and loss swapped; max LR 1e-3, batch
+128 × 1. Preflight: all six compose and pass `validate_config` with the panel
+renders skipped (panels unchanged).
+
+All on `isambard` at `20bf47d0`: pretraining and mixed jobs one GH200, 16 CPUs
+(12 workers), 96 GB, 24 h; fine-tunes 8 CPUs, 48 GB, 8 h. `omnirun submit
+--after` with `--backend isambard` fails with "unknown backend" (the laptop's
+omnirun config has no isambard entry, and `--dry-run` fails the same way), so
+a laptop watcher (`omnirun wait`, then submit; `/tmp/mg_ft_chain.sh`) queues
+each setup's three fine-tunes once its pretraining succeeds.
+
+| setup | pretraining | mixed | fine-tune seeds 0 / 1 / 2 |
+|---|---|---|---|
+| hard | `mg-hard-pre-f6830e` | `mg-hard-mix-89f9e2` | after `mg-hard-pre-f6830e` |
+| easy | `mg-easy-pre-9e5a42` | `mg-easy-mix-f23842` | after `mg-easy-pre-9e5a42` |
+
 ## Frequency-scaling probe of the grid (2026-10-26)
 
 `scripts/rps_cue_probe.py freq` (six DREGON cruise clips, alpha 0.70-1.30) on the
