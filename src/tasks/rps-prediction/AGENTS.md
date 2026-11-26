@@ -132,8 +132,9 @@ Do not use `loss=pit_mse` (it can silently score the wrong telemetry rows),
 the four-rotor metrics/panel, or the legacy `Type@ckpt` loader (it forces
 four outputs). The paper uses 93-frame sequences; the port preserves
 `N // 512 + 1` frames for any clip length. Hann window, centered zero padding,
-Slaney power mel, and squared real cepstrum with a log-power floor of
-`1e-10` are reconstruction choices where the paper is silent.
+Slaney log-mel, and squared real cepstrum, both with a log floor of `1e-10`,
+are reconstruction choices where the paper is silent. The front end runs in
+fp32 under autocast.
 
 **Adaptation** (not in the paper): `model=marcoux_grondin_rps4
 loss=marcoux_grondin_rps4` predicts one unsorted track per rotor, trained

@@ -738,7 +738,7 @@ The synthetic pretraining grid is in `rp-synthetic.md`, § "Paper grid".
 
 Two new Table IV rows for the BPF estimator of Marcoux & Grondin (ICRA 2026,
 arXiv:2602.09991; no reference code or weights published), the CRNN of its
-§II-A: mel power + power cepstrum, four parallel CNN blocks, separate
+§II-A: log-mel + power cepstrum, four parallel CNN blocks, separate
 3-layer BiGRU speed and activity branches, 26.6M parameters. The paper
 predicts the two fastest BPFs sorted per frame, which the four-rotor panel
 cannot score, so both runs train the adaptation `marcoux_grondin_rps4`: four
@@ -757,9 +757,18 @@ First submission 2026-11-26 at `83ee20d3` (`rp-marcoux-grondin-all-15e39d`,
 before any checkpoint. Training audio reaches 1.1e5 STFT bin power (2 of 512
 `rp_all` items), past fp16's 65504, so the autocast mel matmul returned inf and
 NaN entered the BatchNorm running stats. Fixed in `ecbd0179` (front end in
-fp32; the largest training mel value, 6964, then reaches the fp16 conv
-safely). Resubmitted to `isambard` (one GH200, 16 cores, 96 GB):
-`rp-marcoux-grondin-all-1741a6` and `rp-marcoux-grondin-allla-7f7596`.
+fp32). Second submission at `ecbd0179` (`rp-marcoux-grondin-all-1741a6`,
+`rp-marcoux-grondin-allla-7f7596`): validation non-finite at step 2000 / 1500,
+training loss finite. Linear mel power is heavy-tailed: on the `all`
+step-1500 checkpoint the first conv reaches 3.2e3 on training audio against a
+BatchNorm std of 6–13. Inferred path (no step-2000 weights were saved): a
+loud batch overflows that conv under fp16; `GradScaler` skips the step
+without a log line (the non-finite-loss warning fires only with the scaler
+disabled), but the BatchNorm running stats keep the NaN.
+Fixed in `4dca0314`: log-mel (floor 1e-10; on 1024 training items it spans
+[-18.8, 8.8], max |z| 5.6). The paper says only "mel spectrogram".
+Third submission at `4dca0314` to `isambard` (one GH200, 16 cores, 96 GB):
+`rp-marcoux-grondin-all-ccff5a` and `rp-marcoux-grondin-allla-12960f`.
 Everything else as the other `rp_*` rows; the Table IV cells are read at the
 lowest five-round median of `real_macro` (`scripts/rp_history.py --best`).
 
