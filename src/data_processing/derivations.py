@@ -71,12 +71,14 @@ from collections.abc import Iterator
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import dload
 import numpy as np
 import soundfile as sf
 import tdseries as td
 
+from data_processing.sources.aerial_bioacoustics import CHIRO_CLOCK_SHA256
 from data_processing.sources.new_motor_data import AUDIO_CLOCK
 
 Sample = tuple[str, dict[str, bytes]]
@@ -86,6 +88,7 @@ Sample = tuple[str, dict[str, bytes]]
 #: mints a new derived identity); ``tests/data_processing/test_derivations.py``
 #: asserts these match the lock file (pin-drift guard).
 PARENTS = {
+    "AuDroK": "dload:AuDroK@ea0e533e6ce4160cb67d9b57c252d569ae6c4865e2f2371e6a5e19975140c08f",
     "DREGON": "dload:DREGON@db39bcf762d0b2beb3433fc2760da6a55e078f8134f8bb074ee8bf985a5ffc03",
     "librispeech": "dload:librispeech@b674a6d0c4e9d598e7f12400d75e7f21b9bea72845aa3bcb37f5b96d56f73783",
     "librispeech-dev-clean": "dload:librispeech-dev-clean@175724bf29113ccb789538d469211e03bd42c0762136f16a2fcb249b9d365d47",
@@ -555,6 +558,53 @@ def generate_real_valid_panel(gen: dict[str, Any]) -> Iterator[Sample]:
 
 # ─── Source-frames generator (uniform over the sources registry) ──────────────
 
+# These three labels live in the shard footer so the listening page can list
+# subcategories without reading an individual Frame from every recording.
+ACOUSTIC_BROWSE_KEY = "placement/condition/subcategory/v1"
+
+
+def _acoustic_key(key: str, frame: td.Frame) -> str:
+    meta = frame["meta"]
+    labels = (
+        meta["observation"]["mic_placement"],
+        meta["operating"]["condition"],
+        meta["label"]["subcategory"],
+    )
+    for label in labels:
+        if not isinstance(label, str) or not label.strip() or label in (".", ".."):
+            raise ValueError(f"{key}: invalid acoustic catalog label {label!r}")
+    return "/".join(quote(label, safe="") for label in labels) + "/" + key
+
+
+def _acoustic_frames(
+    source: str,
+    *,
+    release: str,
+    recipe_version: int = 1,
+    clock_table_sha256: str | None = None,
+) -> dict[str, Any]:
+    """One immutable acquisition source; reuse an existing raw pin when present."""
+    raw = (
+        {"kind": "dload", "uri": PARENTS[source]}
+        if source in PARENTS
+        else {"kind": "download", "release": release}
+    )
+    gen = {
+        "recipe_version": recipe_version,
+        "source": source,
+        "raw": raw,
+        "browse_key": ACOUSTIC_BROWSE_KEY,
+    }
+    if clock_table_sha256 is not None:
+        gen["clock_table_sha256"] = clock_table_sha256
+    return {
+        "generator": "source_frames",
+        "adopt_only": False,
+        "note": release,
+        "target_shard_size": 32 * 1024**2,
+        "gen": gen,
+    }
+
 
 def generate_source_frames(gen: dict[str, Any]) -> Iterator[Sample]:
     """Yield ``tdframe-v1`` recording samples built by a sources-registry entry.
@@ -584,6 +634,8 @@ def generate_source_frames(gen: dict[str, Any]) -> Iterator[Sample]:
             from data_processing.refined_label_track import attach_refined
 
             frame = attach_refined(frame, key)
+        if gen.get("browse_key") == ACOUSTIC_BROWSE_KEY:
+            key = _acoustic_key(key, frame)
         yield key, frame_to_sample(frame)
 
 
@@ -2145,6 +2197,69 @@ SPECS: dict[str, dict[str, Any]] = {
         "note": "Adopt-in-place; raw via the registry's pinned zenodo spec.",
         "gen": {"recipe_version": 1, "source": "MIMII-DG", "raw": {"kind": "download"}},
     },
+    "AIRA-UAS-frames": _acoustic_frames(
+        "AIRA-UAS",
+        release="UAS.tar.gz sha256:67218177b3895ba0566b2f970c86cef2b22231140ca1a3e0323fde1523406f27",
+        recipe_version=2,
+    ),
+    "QMUL-insitu-aerial-frames": _acoustic_frames(
+        "QMUL-insitu-aerial",
+        release="Zenodo 19925797, Data.zip md5:a9c0ca5045e6c6b2ab0684f3f0a09908",
+        recipe_version=2,
+    ),
+    "QMUL-bird-drone-frames": _acoustic_frames(
+        "QMUL-bird-drone",
+        release="Zenodo 8403622, bird_drone.zip md5:96c313dbcc881567797c975fe8c92fad",
+        recipe_version=3,
+    ),
+    "Salford-DroneNoise-frames": _acoustic_frames(
+        "Salford-DroneNoise",
+        release="Figshare 22133411 v3, DOI 10.17866/rd.salford.22133411.v3",
+    ),
+    "UaVirBASE-frames": _acoustic_frames(
+        "UaVirBASE",
+        release="Zenodo 15391924 v1.0, Microphone_array.zip md5:3c4081511630f8045fda0347cac45534",
+    ),
+    "D3SET-frames": _acoustic_frames(
+        "D3SET", release="introlab/d3set@b7f80cfbb1393ed490a8677cb1550ed95b076718", recipe_version=2
+    ),
+    "IDMT-Berne-frames": _acoustic_frames(
+        "IDMT-Berne",
+        release="Zenodo 17525811, MicArrayData30s.zip md5:fd8cfda2d852e351b2d33e1ae9a5aba4",
+        recipe_version=2,
+    ),
+    "ICSV31-drone-anomaly-frames": _acoustic_frames(
+        "ICSV31-drone-anomaly",
+        release=(
+            "ICSV31 challenge: train/eval, test, test labels; md5 "
+            "c590af1b8a7224bb839436465d762403, a8a7c5d8b4dc93907b74f7f372565236, "
+            "033cebe7692d3fc9ed837db28cf79e92"
+        ),
+    ),
+    "SDU-DroneBatArray-frames": _acoustic_frames(
+        "SDU-DroneBatArray", release="Zenodo 7329733", recipe_version=3
+    ),
+    "AuDroK-frames": _acoustic_frames(
+        "AuDroK", release="Mobilithek offer 605778370199691264", recipe_version=2
+    ),
+    "Chirocopter-frames": _acoustic_frames(
+        "Chirocopter",
+        release="Dryad 10.5061/dryad.cf472n3 v1; identical Zenodo 4993744 files",
+        clock_table_sha256=CHIRO_CLOCK_SHA256,
+        recipe_version=2,
+    ),
+    "Hear-and-Avoid-frames": _acoustic_frames(
+        "Hear-and-Avoid", release="DataverseNL 10.34894/ARULTD v1.0 (2718)", recipe_version=2
+    ),
+    "KAIST-drone-fault-frames": _acoustic_frames(
+        "KAIST-drone-fault", release="Zenodo 7779574 v1", recipe_version=2
+    ),
+    "ANU-drone-motor-current-frames": _acoustic_frames(
+        "ANU-drone-motor-current", release="Zenodo 16196947", recipe_version=2
+    ),
+    "KULeuven-UAV-egonoise-frames": _acoustic_frames(
+        "KULeuven-UAV-egonoise", release="KU Leuven RDR 10.48804/PZAVUC v1.1", recipe_version=3
+    ),
     "AeroSonicDB": {
         "generator": "source_frames",
         "adopt_only": True,
@@ -2660,7 +2775,10 @@ def dataset_meta(name: str) -> dict[str, Any]:
     if kind == "source_frames":
         from data_processing import sources
 
-        return sources.dataset_meta(entry["gen"]["source"])
+        meta = sources.dataset_meta(entry["gen"]["source"])
+        if entry["gen"].get("browse_key") == ACOUSTIC_BROWSE_KEY:
+            meta["browse_key"] = ACOUSTIC_BROWSE_KEY
+        return meta
     meta: dict[str, Any] = {"layout": layout}
     if kind == "frame_subset":
         meta["description"] = entry["gen"].get("meta_updates", {}).get("derived_note", "")

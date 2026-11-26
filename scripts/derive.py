@@ -84,12 +84,16 @@ def cmd_derive(args: argparse.Namespace) -> int:
     repo = open_repository()
     pipe = build_pipeline(name)
     recipe = json.dumps({"name": name, **entry}, indent=2, sort_keys=True)
+    packing = (
+        {"target_shard_size": entry["target_shard_size"]} if "target_shard_size" in entry else {}
+    )
     dataset = repo.derive(
         name,
         pipe,
         meta=dataset_meta(name),
         recipe=recipe,
         progress=print,
+        **packing,
     )
     version = dataset.manifest.version
     print(f"materialized {name} -> {version}")

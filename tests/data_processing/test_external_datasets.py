@@ -97,6 +97,23 @@ def test_safe_key_never_leading_underscore():
     assert _common.safe_key("///") == "sample"
 
 
+def test_audio_join_checks_quiet_channels_and_slope_at_zero_crossings():
+    t = np.arange(-1200, 1200) / 48000
+    tone = np.sin(2 * np.pi * 500 * t)
+    left, right = np.split(np.stack([0.8 * tone, 0.012 * tone]), 2, axis=-1)
+    assert _common.clean_audio_seam(left, right, 48000)
+
+    # The second mic changes polarity right at a zero crossing. The first
+    # difference at the join is normal; only the slope reveals the splice.
+    flipped = right.copy()
+    flipped[1] *= -1
+    assert not _common.clean_audio_seam(left, flipped, 48000)
+
+    offset = right.copy()
+    offset[1] += 0.1
+    assert not _common.clean_audio_seam(left, offset, 48000)
+
+
 def _write_mimii_tree(root, snr, machine, unit, condition, stem, channels=8, n=1600):
     d = root / f"{snr}_dB_{machine}" / machine / unit / condition
     d.mkdir(parents=True, exist_ok=True)

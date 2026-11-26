@@ -150,6 +150,39 @@ def read_audio_file(path: Path) -> tuple[np.ndarray, int]:
     return np.ascontiguousarray(raw.T), int(sr)
 
 
+def clean_audio_seam(left: np.ndarray, right: np.ndarray, sample_rate: int) -> bool:
+    """Screen a proposed file boundary for a click, not for common provenance.
+
+    Inputs are normalized PCM with time last. Compare the step and both changes
+    in slope with the corresponding within-file differences on each channel.
+    A pass cannot establish that two files were recorded consecutively.
+    """
+    if sample_rate <= 0 or min(left.ndim, right.ndim) == 0 or left.shape[:-1] != right.shape[:-1]:
+        raise ValueError("expected positive sample rate and matching channel axes")
+    if not left.size or not right.size:
+        return False
+    width = min(4096, max(32, round(0.025 * sample_rate)))
+    a = np.asarray(left[..., -width:], dtype=np.float64)
+    b = np.asarray(right[..., :width], dtype=np.float64)
+    if min(a.shape[-1], b.shape[-1]) < 8 or not (np.isfinite(a).all() and np.isfinite(b).all()):
+        return False
+
+    da, db = np.diff(a, axis=-1), np.diff(b, axis=-1)
+    step = b[..., 0] - a[..., -1]
+    kink = np.maximum(np.abs(step - da[..., -1]), np.abs(db[..., 0] - step))
+
+    def limit(before: np.ndarray, after: np.ndarray) -> np.ndarray:
+        diffs = np.abs(np.concatenate((before, after), axis=-1))
+        # Three times the local 99.5th percentile, with a one-PCM16-LSB floor
+        # so dithering at a transition to digital silence isn't called a click.
+        return np.maximum(1 / 32768, 3 * np.quantile(diffs, 0.995, axis=-1))
+
+    return bool(
+        np.all(np.abs(step) <= limit(da, db))
+        and np.all(kink <= limit(np.diff(da, axis=-1), np.diff(db, axis=-1)))
+    )
+
+
 def find_csv(root: Path, name: str) -> Path | None:
     for p in root.rglob(name):
         return p

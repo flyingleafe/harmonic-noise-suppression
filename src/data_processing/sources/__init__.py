@@ -35,21 +35,32 @@ import tdseries as td
 
 from data_processing import downloaders
 from data_processing.sources import (
+    aerial_bioacoustics,
     aerosonicdb,
+    aira_uas,
+    anu_current,
+    audrok,
     avq,
     blackbird,
+    d3set,
     dregon,
     droneaudio,
+    hear_avoid,
     hornbase,
     hustmotor,
+    idmt_berne,
     kaist,
+    kaist_drone,
+    kuleuven_ego,
     michaels,
     mimii,
     nanobench,
     neurobem,
     november_frames,
     pitcn,
+    salford,
     spcup19,
+    uavirbase,
     vid,
 )
 from data_processing.sources._common import LAYOUT
@@ -132,6 +143,122 @@ REGISTRY: dict[str, SourceDataset] = {
             frames_dataset="michaels-test-frames",
         ),
         # ── External harmonic-noise datasets ──────────────────────────────
+        SourceDataset(
+            name=aira_uas.DATASET,
+            provenance=aira_uas.PROVENANCE,
+            fetcher=aira_uas.download_aira_uas,
+            builder=aira_uas.build,
+            frames_dataset="AIRA-UAS-frames",
+        ),
+        SourceDataset(
+            name=aerial_bioacoustics.QMUL_INSITU,
+            provenance=aerial_bioacoustics.QMUL_INSITU_PROVENANCE,
+            download=DownloadSpec("zenodo", {"record_id": 19925797, "files": ["Data.zip"]}),
+            builder=aerial_bioacoustics.build_qmul_insitu,
+            frames_dataset="QMUL-insitu-aerial-frames",
+        ),
+        SourceDataset(
+            name=aerial_bioacoustics.QMUL_BIRD_DRONE,
+            provenance=aerial_bioacoustics.QMUL_BIRD_DRONE_PROVENANCE,
+            download=DownloadSpec("zenodo", {"record_id": 8403622, "files": ["bird_drone.zip"]}),
+            builder=aerial_bioacoustics.build_qmul_bird_drone,
+            frames_dataset="QMUL-bird-drone-frames",
+        ),
+        SourceDataset(
+            name=salford.DATASET,
+            provenance=salford.PROVENANCE,
+            download=DownloadSpec(
+                "http",
+                {"urls": {salford.ZIP_NAME: salford.ZIP_URL, salford.META_NAME: salford.META_URL}},
+            ),
+            builder=salford.build,
+            frames_dataset=salford.FRAMES_DATASET,
+        ),
+        SourceDataset(
+            name=uavirbase.DATASET,
+            provenance=uavirbase.PROVENANCE,
+            download=DownloadSpec(
+                "zenodo", {"record_id": uavirbase.ZENODO_RECORD, "files": [uavirbase.ZIP_NAME]}
+            ),
+            builder=uavirbase.build,
+            frames_dataset=uavirbase.FRAMES_DATASET,
+        ),
+        SourceDataset(
+            name=d3set.DATASET,
+            provenance=d3set.PROVENANCE,
+            fetcher=d3set.download_d3set,
+            builder=d3set.build,
+            frames_dataset="D3SET-frames",
+        ),
+        SourceDataset(
+            name="IDMT-Berne",
+            provenance=idmt_berne.PROVENANCE,
+            download=DownloadSpec(
+                "zenodo",
+                {"record_id": idmt_berne.ZENODO_RECORD, "files": [idmt_berne.ZIP_NAME]},
+                extract=True,
+            ),
+            builder=idmt_berne.build,
+            frames_dataset=idmt_berne.DATASET,
+        ),
+        SourceDataset(
+            name=kaist_drone.ICSV31_DATASET,
+            provenance=kaist_drone.ICSV31_PROVENANCE,
+            fetcher=kaist_drone.download_icsv31,
+            builder=kaist_drone.build_icsv31,
+            frames_dataset="ICSV31-drone-anomaly-frames",
+        ),
+        SourceDataset(
+            name=aerial_bioacoustics.SDU_BAT_ARRAY,
+            provenance=aerial_bioacoustics.SDU_PROVENANCE,
+            download=DownloadSpec(
+                "zenodo", {"record_id": 7329733, "files": list(aerial_bioacoustics.SDU_FILES)}
+            ),
+            builder=aerial_bioacoustics.build_sdu_bat_array,
+            frames_dataset="SDU-DroneBatArray-frames",
+        ),
+        SourceDataset(
+            name=aerial_bioacoustics.CHIROCOPTER,
+            provenance=aerial_bioacoustics.CHIROCOPTER_PROVENANCE,
+            download=DownloadSpec(
+                "zenodo",
+                {"record_id": 4993744, "files": list(aerial_bioacoustics.CHIROCOPTER_FILES)},
+            ),
+            builder=aerial_bioacoustics.build_chirocopter,
+            frames_dataset="Chirocopter-frames",
+        ),
+        SourceDataset(
+            name=hear_avoid.DATASET,
+            provenance=hear_avoid.PROVENANCE,
+            fetcher=hear_avoid.download_hear_avoid,
+            builder=hear_avoid.build,
+            frames_dataset="Hear-and-Avoid-frames",
+        ),
+        SourceDataset(
+            name=kaist_drone.ZENODO_DATASET,
+            provenance=kaist_drone.ZENODO_PROVENANCE,
+            download=DownloadSpec(
+                "zenodo", {"record_id": 7779574, "files": list(kaist_drone.ZENODO_FILES)}
+            ),
+            builder=kaist_drone.build,
+            frames_dataset="KAIST-drone-fault-frames",
+        ),
+        SourceDataset(
+            name=anu_current.DATASET,
+            provenance=anu_current.PROVENANCE,
+            download=DownloadSpec(
+                "zenodo", {"record_id": 16196947, "files": list(anu_current.FILES)}
+            ),
+            builder=anu_current.build,
+            frames_dataset="ANU-drone-motor-current-frames",
+        ),
+        SourceDataset(
+            name=kuleuven_ego.DATASET,
+            provenance=kuleuven_ego.PROVENANCE,
+            fetcher=kuleuven_ego.download,
+            builder=kuleuven_ego.build,
+            frames_dataset="KULeuven-UAV-egonoise-frames",
+        ),
         SourceDataset(
             name="MIMII",
             provenance=mimii.MIMII_PROVENANCE,
@@ -359,18 +486,11 @@ REGISTRY: dict[str, SourceDataset] = {
             raw_dataset="UOEMD-VAFCVS",
         ),
         SourceDataset(
-            name="AuDroK",
-            provenance={
-                "source_url": "https://mobilithek.info/offers/605778370199691264",
-                "publisher": "H2Think gGmbH (mFUND project AuDroK)",
-                "description": (
-                    "AUDROK drone sound data, all seven Mobilithek distributions: "
-                    "Measurements_{1-19,20-39,40-59,60-79}/ (XML containers, each a "
-                    "base64-encoded WAV), Dresden-II-S-{A,B}/ (outdoor WAVs) and "
-                    "Angebotsbeschreibung.xml (the offer's database description)."
-                ),
-            },
-            raw_dataset="AuDroK",
+            name=audrok.RAW_DATASET,
+            provenance=audrok.PROVENANCE,
+            raw_dataset=audrok.RAW_DATASET,
+            builder=audrok.build,
+            frames_dataset=audrok.DATASET,
         ),
     )
 }

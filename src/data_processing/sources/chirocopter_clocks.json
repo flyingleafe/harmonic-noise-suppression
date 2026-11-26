@@ -1,0 +1,478 @@
+{
+  "FLY095": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -602.3,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          186.752,
+          645.033
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-24T11:05:25.734+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.279,
+      "command_vs_tonal_derivative_pearson_r": 0.261,
+      "command_vs_tonal_level_pearson_r": 0.993,
+      "gps_fit_native_sample_range": [
+        5099.781,
+        265857.422
+      ],
+      "gps_fit_p95_edge_error_s": 0.018406,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-24T10:55:23.434+00:00",
+      "gps_second_edges": 1305,
+      "gps_second_edges_inlier": 1305,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.156,
+      "other_wav_level_best_pearson_r": 0.0,
+      "recorder_clock_residual_s": -73.226
+    },
+    "recording": "Record_2017_May_24_050412.508.wav",
+    "seconds_per_sample": 0.005001027067748013,
+    "validated_audio_interval_s": [
+      0.0,
+      673.742
+    ]
+  },
+  "FLY096": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -43.8,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          39.314,
+          526.8
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-24T11:19:36.665+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.432,
+      "command_vs_tonal_derivative_pearson_r": 0.387,
+      "command_vs_tonal_level_pearson_r": 0.983,
+      "gps_fit_native_sample_range": [
+        35.149,
+        119403.987
+      ],
+      "gps_fit_p95_edge_error_s": 0.011274,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-24T11:18:52.865+00:00",
+      "gps_second_edges": 598,
+      "gps_second_edges_inlier": 598,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.098,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -73.366
+    },
+    "recording": "Record_2017_May_24_051823.299.wav",
+    "seconds_per_sample": 0.005000897400974888,
+    "validated_audio_interval_s": [
+      0.0,
+      544.17
+    ]
+  },
+  "FLY097": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -369.7,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          77.603,
+          549.139
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-27T11:01:47.250+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.388,
+      "command_vs_tonal_derivative_pearson_r": 0.359,
+      "command_vs_tonal_level_pearson_r": 0.992,
+      "gps_fit_native_sample_range": [
+        5076.422,
+        189675.12
+      ],
+      "gps_fit_p95_edge_error_s": 0.019929,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-27T10:55:37.550+00:00",
+      "gps_second_edges": 924,
+      "gps_second_edges_inlier": 923,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.104,
+      "other_wav_level_best_pearson_r": 0.362,
+      "recorder_clock_residual_s": -75.971
+    },
+    "recording": "Record_2017_May_27_050031.280.wav",
+    "seconds_per_sample": 0.0050010130125459455,
+    "validated_audio_interval_s": [
+      0.0,
+      562.032
+    ]
+  },
+  "FLY098": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -18.3,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          43.688,
+          490.658
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-27T11:13:59.929+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.427,
+      "command_vs_tonal_derivative_pearson_r": 0.387,
+      "command_vs_tonal_level_pearson_r": 0.994,
+      "gps_fit_native_sample_range": [
+        74.038,
+        108449.564
+      ],
+      "gps_fit_p95_edge_error_s": 0.002487,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-27T11:13:41.629+00:00",
+      "gps_second_edges": 543,
+      "gps_second_edges_inlier": 543,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.112,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -75.995
+    },
+    "recording": "Record_2017_May_27_051243.934.wav",
+    "seconds_per_sample": 0.005001139213814741,
+    "validated_audio_interval_s": [
+      0.0,
+      501.746
+    ]
+  },
+  "FLY099": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -431.4,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          74.483,
+          541.011
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-29T11:04:11.745+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.444,
+      "command_vs_tonal_derivative_pearson_r": 0.389,
+      "command_vs_tonal_level_pearson_r": 0.981,
+      "gps_fit_native_sample_range": [
+        4929.455,
+        201086.611
+      ],
+      "gps_fit_p95_edge_error_s": 0.003629,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-29T10:57:00.345+00:00",
+      "gps_second_edges": 982,
+      "gps_second_edges_inlier": 982,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.122,
+      "other_wav_level_best_pearson_r": 0.72,
+      "recorder_clock_residual_s": -78.449
+    },
+    "recording": "Record_2017_May_29_050253.297.wav",
+    "seconds_per_sample": 0.005001094860099517,
+    "validated_audio_interval_s": [
+      0.0,
+      559.234
+    ]
+  },
+  "FLY100": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -15.9,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          45.183,
+          487.423
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-29T11:15:38.363+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.522,
+      "command_vs_tonal_derivative_pearson_r": 0.499,
+      "command_vs_tonal_level_pearson_r": 0.991,
+      "gps_fit_native_sample_range": [
+        109.505,
+        109879.975
+      ],
+      "gps_fit_p95_edge_error_s": 0.010789,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-29T11:15:22.463+00:00",
+      "gps_second_edges": 550,
+      "gps_second_edges_inlier": 550,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.249,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -78.486
+    },
+    "recording": "Record_2017_May_29_051419.878.wav",
+    "seconds_per_sample": 0.005001246848489774,
+    "validated_audio_interval_s": [
+      0.0,
+      502.284
+    ]
+  },
+  "FLY101": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -387.0,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          69.328,
+          604.034
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-30T11:00:05.676+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.452,
+      "command_vs_tonal_derivative_pearson_r": 0.411,
+      "command_vs_tonal_level_pearson_r": 0.982,
+      "gps_fit_native_sample_range": [
+        6054.026,
+        231613.537
+      ],
+      "gps_fit_p95_edge_error_s": 0.003795,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-30T10:53:38.676+00:00",
+      "gps_second_edges": 1129,
+      "gps_second_edges_inlier": 1129,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.165,
+      "other_wav_level_best_pearson_r": 0.0,
+      "recorder_clock_residual_s": -79.637
+    },
+    "recording": "Record_2017_May_30_045846.040.wav",
+    "seconds_per_sample": 0.005001095580677729,
+    "validated_audio_interval_s": [
+      0.0,
+      650.35
+    ]
+  },
+  "FLY102": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -16.8,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          34.394,
+          503.4
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-30T11:16:23.863+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.478,
+      "command_vs_tonal_derivative_pearson_r": 0.434,
+      "command_vs_tonal_level_pearson_r": 0.987,
+      "gps_fit_native_sample_range": [
+        187.667,
+        119760.463
+      ],
+      "gps_fit_p95_edge_error_s": 0.00186,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-30T11:16:07.063+00:00",
+      "gps_second_edges": 599,
+      "gps_second_edges_inlier": 599,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.156,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -79.648
+    },
+    "recording": "Record_2017_May_30_051504.216.wav",
+    "seconds_per_sample": 0.0050011175192970925,
+    "validated_audio_interval_s": [
+      0.0,
+      520.926
+    ]
+  },
+  "FLY103": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -511.8,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          70.473,
+          567.349
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-31T11:00:29.711+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.512,
+      "command_vs_tonal_derivative_pearson_r": 0.445,
+      "command_vs_tonal_level_pearson_r": 0.988,
+      "gps_fit_native_sample_range": [
+        5403.086,
+        221771.422
+      ],
+      "gps_fit_p95_edge_error_s": 0.018083,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-31T10:51:57.911+00:00",
+      "gps_second_edges": 1083,
+      "gps_second_edges_inlier": 1083,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.142,
+      "other_wav_level_best_pearson_r": 0.277,
+      "recorder_clock_residual_s": -80.433
+    },
+    "recording": "Record_2017_May_31_045909.278.wav",
+    "seconds_per_sample": 0.005001021166618782,
+    "validated_audio_interval_s": [
+      0.0,
+      582.582
+    ]
+  },
+  "FLY104": {
+    "audio_alignment_uncertainty_s": 1.0,
+    "audio_offset_s": -15.7,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          42.896,
+          510.632
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-05-31T11:11:55.258+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.422,
+      "command_vs_tonal_derivative_pearson_r": 0.387,
+      "command_vs_tonal_level_pearson_r": 0.991,
+      "gps_fit_native_sample_range": [
+        91.589,
+        121858.443
+      ],
+      "gps_fit_p95_edge_error_s": 0.011026,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-05-31T11:11:39.558+00:00",
+      "gps_second_edges": 610,
+      "gps_second_edges_inlier": 610,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.174,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -80.499
+    },
+    "recording": "Record_2017_May_31_051034.760.wav",
+    "seconds_per_sample": 0.005001222228371547,
+    "validated_audio_interval_s": [
+      0.0,
+      528.09
+    ]
+  },
+  "FLY106": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -716.9,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          90.241,
+          543.287
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-06-01T11:03:05.877+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.438,
+      "command_vs_tonal_derivative_pearson_r": 0.403,
+      "command_vs_tonal_level_pearson_r": 0.989,
+      "gps_fit_native_sample_range": [
+        6403.6,
+        260347.547
+      ],
+      "gps_fit_p95_edge_error_s": 0.003424,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-06-01T10:51:08.977+00:00",
+      "gps_second_edges": 1271,
+      "gps_second_edges_inlier": 1271,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.144,
+      "other_wav_level_best_pearson_r": 0.333,
+      "recorder_clock_residual_s": -81.788
+    },
+    "recording": "Record_2017_Jun_01_050144.089.wav",
+    "seconds_per_sample": 0.005001090386830046,
+    "validated_audio_interval_s": [
+      0.0,
+      570.69
+    ]
+  },
+  "FLY107": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -21.3,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          43.962,
+          499.023
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-06-01T11:14:25.576+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.427,
+      "command_vs_tonal_derivative_pearson_r": 0.38,
+      "command_vs_tonal_level_pearson_r": 0.99,
+      "gps_fit_native_sample_range": [
+        146.674,
+        128719.505
+      ],
+      "gps_fit_p95_edge_error_s": 0.010091,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-06-01T11:14:04.276+00:00",
+      "gps_second_edges": 644,
+      "gps_second_edges_inlier": 644,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.116,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -81.771
+    },
+    "recording": "Record_2017_Jun_01_051303.805.wav",
+    "seconds_per_sample": 0.00500104464004013,
+    "validated_audio_interval_s": [
+      0.0,
+      525.18
+    ]
+  },
+  "FLY111": {
+    "audio_alignment_uncertainty_s": 0.5,
+    "audio_offset_s": -17.9,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          120.283,
+          592.186
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-06-05T10:24:14.004+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.316,
+      "command_vs_tonal_derivative_pearson_r": 0.305,
+      "command_vs_tonal_level_pearson_r": 0.989,
+      "gps_fit_native_sample_range": [
+        179.422,
+        128750.686
+      ],
+      "gps_fit_p95_edge_error_s": 0.003622,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-06-05T10:23:56.104+00:00",
+      "gps_second_edges": 644,
+      "gps_second_edges_inlier": 644,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.112,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -86.301
+    },
+    "recording": "Record_2017_Jun_05_042247.703.wav",
+    "seconds_per_sample": 0.005001088610456387,
+    "validated_audio_interval_s": [
+      0.0,
+      609.928
+    ]
+  },
+  "FLY113": {
+    "audio_alignment_uncertainty_s": 1.5,
+    "audio_offset_s": -6.5,
+    "evidence": {
+      "active_audio_intervals_s": [
+        [
+          43.198,
+          446.334
+        ]
+      ],
+      "audio_sample0_utc_from_gps_and_alignment": "2017-06-05T10:40:49.234+00:00",
+      "command_vs_broadband_derivative_pearson_r": 0.235,
+      "command_vs_tonal_derivative_pearson_r": 0.224,
+      "command_vs_tonal_level_pearson_r": 0.984,
+      "gps_fit_native_sample_range": [
+        64.551,
+        95834.644
+      ],
+      "gps_fit_p95_edge_error_s": 0.012766,
+      "gps_sample0_utc_assuming_utc_plus_8": "2017-06-05T10:40:42.734+00:00",
+      "gps_second_edges": 480,
+      "gps_second_edges_inlier": 480,
+      "method": "independent A2 GPS second-edge fit; choose same-day WAV and lag by six-channel mean motor code vs 120\u2013700 Hz acoustic band power and corroborate with temporal derivatives of tonal and broadband power, onset/cessation and paired-flight clock residual",
+      "next_broadband_derivative_pearson_r_at_least_1s_away": 0.148,
+      "other_wav_level_best_pearson_r": null,
+      "recorder_clock_residual_s": -86.334
+    },
+    "recording": "Record_2017_Jun_05_043922.901.wav",
+    "seconds_per_sample": 0.005000996081781272,
+    "validated_audio_interval_s": [
+      0.0,
+      462.084
+    ]
+  }
+}
