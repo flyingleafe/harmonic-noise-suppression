@@ -42,6 +42,33 @@ server, source it yourself (`set -a; . ./.env; set +a`) before invoking
 
 ### Overnight on CPU server — process and publish a dataset
 
+For a new source, check `dload ls` **before fetching the upstream archive**.
+Check candidate names, historical versions and the actual contents of raw
+bundles: a binary-class mono derivative is not the native multichannel study.
+Reuse an existing suitable Frames version. If only a raw tree exists, freeze
+its `dload:NAME@<full version>` as the derivation parent; do not upload it
+again. For an externally hosted, versioned release, the source builder can
+read the original into worker scratch and publish only the Frames.
+
+Run parallel conversions with **one publisher per dataset name**. On the CPU
+worker, `python scripts/derive.py derive NAME --no-pin` publishes the version;
+after checking its manifest, key counts and decoded samples from R2, run
+`dload pin NAME FULL_HASH` in the consuming checkout. This pins without pulling any audio.
+Use a different `DLOAD_CACHE_DIR` per concurrent writer: on shared GPFS,
+simultaneous conversions hit `FileNotFoundError` during shard-cache eviction.
+Reuse verified raw input trees, not a mutable eviction cache.
+
+**Replacing a reviewed release.** A new pin alone does not reclaim R2 space.
+On `uni-cpu`, retain a verified rollback copy, upload the exact reviewed
+manifest and shards, and hash the shards read back from R2. Switch the lock
+only after verification. Before retiring the predecessor, confirm the live
+consumer resolves the new pin. Remove only the specified old manifest, derived
+refs pointing to it, and its shards referenced by **no surviving manifest**.
+`dload gc` is bucket-wide; it is not a version-scoped cleanup. Older versions
+can share a shard, so the physical size delta need not equal the difference
+between the two manifest totals.
+See [acoustic source coverage and licences](data-catalog.md#additional-rotor-acoustics-recordings).
+
 **Raw trees** are committed once with the CLI: `dload commit NAME --from
 data/NAME` (key = relpath minus extension, field = the extension; the CLI does
 not skip hidden files), then referenced by a `data_processing.sources` registry

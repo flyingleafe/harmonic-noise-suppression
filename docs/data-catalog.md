@@ -465,6 +465,208 @@ module's `PROVENANCE`):
   not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
   **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
 
+## Additional rotor-acoustics recordings
+
+Acquisition starts from the dload bucket, not from the upstream download
+page. The 26 November inventory found 78 dataset names and 153 manifests.
+`AuDroK@ea0e533e6ce4` already contains the seven original distributions
+(3,501 files, 15.0 GiB); use it as the raw parent. Two superficially related
+pins are not substitutes: `KAIST-rotating-acoustic` is a 3,010 RPM industrial
+testbed, and `zenodo_drone_noises` holds the seven survey WAVs `n116`–`n122`,
+their ZIP and Arrow copies. Neither contains the KAIST drone-fault study.
+DREGON, AVQ, SPCup19 and DroneAudioSet are not re-ingested.
+
+**Derivative overlap.** The pinned [DADS compilation](https://huggingface.co/datasets/geronimobasso/drone-audio-detection-samples/blob/981b832c35b45a57518c989f0f79101adb4ae91f/README.md)
+is not an independent holdout. Its positive file IDs `drone-1`–`1332` match
+Al-Emadi's release; `1333`–`1365` are SPCup19; `1366`–`1370` are DREGON;
+`1371`–`1535` are the [Salford originals](https://doi.org/10.17866/rd.salford.22133411.v3);
+`1536`–`1591` are AuDroK Dresden Mic1. The remaining 162,000 half-second clips
+are KAIST mic1 mixtures, including examples from its official test split.
+These blocks were checked against source lengths and waveforms; not every
+KAIST or Al-Emadi waveform was compared. Use the native releases and their
+recording-level splits, not shuffled DADS clips.
+
+New acoustic Frames preserve the released rate and microphone channels.
+The three leading key components are URL-escaped **microphone placement /
+operating condition / source subcategory**. The manifest identifies this
+convention with `browse_key: placement/condition/subcategory/v1`: the
+listening page can group recordings from shard footers without fetching the
+Frames. Publish one Frame per continuous take, not per storage window. Put
+simultaneous microphone files in documented channel order; preserve placement,
+geometry, native clocks, per-channel valid spans and derived/reference roles.
+Reading a single original waveform intact preserves its sample sequence. Across
+source files, first establish take identity and gap-free chronology, then check
+the waveform step and change in slope on **each** channel at the proposed seam
+(`sources._common.clean_audio_seam`). A clean seam alone cannot establish order
+or synchronize recorders. Keep uncertain joins, independent clips and clock
+resets separate; never hide a join with a crossfade. Split evaluation by take,
+not by microphone, excerpt or derivative.
+
+**Production inventory.** The 15 pins below contain 327,691 Frames in
+74.37 GiB of logical payload; 14 Chirocopter Frames contain logs only. Counts
+include derivatives and controls, not just independent training examples.
+`dload.lock` is authoritative for the exact versions.
+
+| dload pin | Source coverage → Frames | Interpretation |
+|---|---:|---|
+| `D3SET-frames@2f9a85db202c` | 32 source groups + 27 derivative excerpts → 60 | [IntRoLab release](https://github.com/introlab/d3set/tree/b7f80cfbb1393ed490a8677cb1550ed95b076718), GPL-3.0. Twenty of 21 paired flights keep onboard and ground-array audio in one Frame; one misaligned array stays separate. Native motor, motion and GPS tracks retain their own time evidence, including unaligned rows. Each derivative identifies its parent and sample offset. |
+| `AIRA-UAS-frames@ca182fba6b5c` | 21 full captures → 21 | [UNAM AIRA-UAS](https://calebrascon.info/AIRA-UAS/), CC0. Eight onboard channels, 48 kHz PCM32 preserved exactly in float64. The array mirror is acoustically indistinguishable; recording 6 retains explicit valid lengths for its two early-ending microphones. No telemetry was released. |
+| `ANU-drone-motor-current-frames@7e6cdd6a83f8` | 11 motor-current settings + room control → 12 | [Zenodo 16196947](https://zenodo.org/records/16196947), CC BY 4.0. Each run retains all 32 channels; `mic_pos` uses the authors’ 30-position table with NaN for unused inputs 7 and 8. Current is a run setpoint. The 48 kHz rate is inferred from the acquisition protocol. |
+| `AuDroK-frames@09c86c8685f0` | 3,500 source WAVs → 546 chamber takes + 56 Dresden flights | [Mobilithek](https://mobilithek.info/offers/605778370199691264), derived from the unchanged `AuDroK@ea0e533e6ce4`. Channels within a take retain their order and valid spans; publisher array sums are a separate signal. No redistribution licence granted: **project-internal only**. |
+| `QMUL-insitu-aerial-frames@1ebd9ba6ed09` | 9 field WAVs + 5 author derivatives → 11 | [Zenodo 19925797](https://zenodo.org/records/19925797), CC BY 4.0. Three hover takes pair the suspended and ground microphones on separate native 48 kHz grids tied to a common producer cue. The ambient parts remain distinct; montages and denoised outputs are derivatives. |
+| `QMUL-bird-drone-frames@35569b18618d` | 8 complete WAVs → 8 | [Zenodo 8403622](https://zenodo.org/records/8403622), CC BY 4.0. Six suspended 48 kHz hover takes, a drone-off control 1 m above the loudspeaker, and the 20 kHz playback source. The suspension length is nominally 2 m; [Wang et al.](https://doi.org/10.1111/2041-210X.14234) identify the third-party playback source. |
+| `Hear-and-Avoid-frames@0ae57fd3fd98` | 82 array WAVs + 11 video audio streams → 93 | [DataverseNL v1](https://doi.org/10.34894/ARULTD), CC0. External general-aviation aircraft, not the paper’s onboard Bebop audio. Array captures are mono at 50 kHz; video sound is native stereo AAC decoded at 48 kHz. Flight/video IDs link devices without claiming sample synchronization. |
+| `KAIST-drone-fault-frames@dc72a3f825fc` | 324,000 mic files → 318,743 unique mono waveforms | [Zenodo 7779574](https://zenodo.org/records/7779574), CC BY 4.0. Independent 0.5 s, 16 kHz mixtures of tethered-drone audio and campus noise. Identical pairs retain both file IDs; same mixing parameters do not establish stereo synchronization. Disputed labels are flagged. |
+| `ICSV31-drone-anomaly-frames@4283d7085731` | 7,920 challenge clips → 7,920 | [KAIST challenge](https://github.com/ICSV31AIchallenge/ICSV31-AI-Challenge), CC BY-SA 4.0. Distinct 2 s mono 16 kHz remixes, **not independent drone recordings** from KAIST 2023. Original train/eval/test retained (5,400/1,080/1,440); challenge eval/test must not train challenge submissions. Shared segment content was found in a waveform probe; there is no exhaustive clip-to-parent mapping. |
+| `KULeuven-UAV-egonoise-frames@ada893bc5216` | 3 whole RPM runs → 3 | [KU Leuven RDR v1.1](https://doi.org/10.48804/PZAVUC), CC BY-NC-SA 4.0. Each is one 17-channel, 44.1 kHz recording: twelve under-body microphones, four under-rotor references, then the external speech reference. Labels and geometry share the audio channel axis. RPM is a run average. |
+| `IDMT-Berne-frames@7de75c07dfe0` | 163 distributed segments of 8 flights → 12 runs | [Zenodo 17525811](https://zenodo.org/records/17525811), CC BY 4.0. 81.5 minutes from an external eight-channel 48 kHz array. Each run retains original segment offsets, array-local `mic_pos`, and stamped `drone_pos`/`drone_doa`. Altitude is not measured. |
+| `Chirocopter-frames@b3692a40cb4c` | 14 flight WAVs + 8 noise tests + 14 remaining log records → 36 | [Dryad](https://doi.org/10.5061/dryad.cf472n3) / [Zenodo](https://zenodo.org/records/4993744), CC0. Native 250 kHz mono. Each flight carries its aligned GPS, IMU and six motor command codes (not RPM); out-of-audio or unstamped rows remain in a separate log Frame. |
+| `SDU-DroneBatArray-frames@e85db749c130` | 9 complete WAVs → 9 | [Zenodo 7329733](https://zenodo.org/records/7329733), CC BY 4.0. The bat, drone-noise, sonar and noise-floor recordings last 5–20 s at 300/375 kHz. The four-channel array has nominal 1.30 m vertical spacing; the 1 m test is mono. The per-file hardware high-pass setting is not specified. |
+| `Salford-DroneNoise-frames@bfa82a593e97` | 18 nine-mic events + 2 single-mic hovers + 9 calibrations → 29 | [University of Salford Figshare v3](https://doi.org/10.17866/rd.salford.22133411.v3), CC BY 4.0. The external 50 kHz ground array is ordered M1–M9. The two M5-only events and the independent calibrations are not padded into nine microphones. |
+| `UaVirBASE-frames@c68f403afed7` | 128 drone takes + 4 ambient takes → 132 | [Zenodo 15391924 v1.0](https://doi.org/10.5281/zenodo.15391924), CC BY 4.0. Eight synchronized 96 kHz channels from an external NTG-2 mast. Native PCM and the complete per-take JSON are preserved; weather and static pose annotations are not motor telemetry. [Acquisition paper](https://doi.org/10.3390/app15105378). |
+
+The [listening page](explainers/harmonic-noise-datasets.qmd) reads these pins
+by range. `dload pull` is not needed to listen.
+Production range check (no cached audio or preview store): KU Leuven ch17
+at 5000 rpm, 21.3–25.0 s, read 692,123 bytes in three HTTP 206 responses;
+Salford hover M8, 3.3–6.2 s, read 617,544 bytes in three. Neither required a
+whole shard or added a shard to the laptop’s dload cache.
+
+**Recording assembly audit (26 November).** Readback from the pinned packs
+identified 6,123 per-channel streams across the 11 windowed releases. At all
+2,573 former audio-field boundaries (including the independent KU Leuven
+reference track), the step and the change of slope passed on every channel.
+Those checks concern our own storage windows, not adjacency between different
+publisher files. For IDMT, 151 within-part boundaries also passed the waveform
+and position checks. Four part transitions jumped 8–166 m and stay separate:
+the 163 published segments form 12 continuous runs, not eight uninterrupted
+flights. The extra native sample in `P4-static-01` is retained.
+
+QMUL in-situ's three hover takes have two native 48 kHz Series, `audio`
+(suspended mic) and `ground_audio`. The authors' two 22.05 kHz montages
+identify corresponding 600 s excerpts: ground minus suspended file offsets
+are +34.193, +34.888 and −10.731 s at 20, 25 and 30 m. These cues locate the
+recorders on a common timeline; they do **not** calibrate phase. The residual
+lag changes by 5–12 ms during a hover, with propagation and clock drift
+inseparable. Neither native waveform is cropped, padded or resampled.
+
+The KU Leuven release stores all 17 WAVs on `audio`, with the **same
+channel labels on `audio`, `mic_pos` and `mic_role`**. Channels 01–12 are
+the under-body main array; 13–16 are the four under-rotor noise references;
+17 is the external speech mic 0.2 m above the loudspeaker. `mic_pos` gives
+estimated metres in stand coordinates (+x towards the loudspeaker); NaNs
+mark unidentifiable components. The separate `mic_site_pos_body` and
+`mic_site_possible` entries retain candidate sites and unresolved permutations
+instead of assigning arbitrary coordinates. Channel 17 is **not** an
+additional onboard reference for beamforming. Across early/mid/late speech
+the onboard-minus-external delay is 6.1–8.0 ms, with 2–7 samples of within-run
+change; no shared hardware clock is documented and the delay is left intact.
+
+For D3SET, all 27 derivative excerpts match parent windows within one PCM16
+LSB. Of the 21 original flights with onboard and array sound, 20 support the
+producer's alignment; the training flight `26 oct session2 vol2` is nearly a
+whole clap period off (0.915–0.920 s) and remains two linked recordings.
+Array propagation delay is not a clock error and is not subtracted.
+
+AuDroK's 546 anechoic takes each group the six microphone files of a
+measurement phase. The phases themselves have no acquisition timestamps,
+and proposed successive seams pass no more reliably than impossible pairs:
+do not concatenate phases. One take (`04-LD`) retains two three-channel
+clock groups because their relative offset (0/256/512 samples) is unresolved.
+In each of 56 Dresden flights `audio` is Mic1 and `array_sum_audio` holds
+the three published *array sums*, not 72 individually available microphones.
+
+KAIST 2023's 0.5 s windows overlap by 0.25 s and are independently remixed.
+All 324,000 release files are accounted for by 318,743 distinct **mono**
+waveforms; 5,257 exact duplicate pairs retain both file IDs. Do not splice
+remixes or interpret their matching SNR strings as synchronization. For
+1,978 disputed drone-B right-movement files, retain the original labels but
+exclude them from verified healthy selections (counts below). Repeated source
+windows in different official splits are not independent evaluation examples.
+
+**Production cutover (26 November 2026).** `uni-cpu` job
+`ro-release2-cutover-61f89f` promoted the twelve replacements and new Salford
+release. The consumers switched only after full R2 shard-hash verification;
+the job then retired the twelve old manifests and 1,480 exclusive shards.
+The replacements uploaded 61,072,183,840 bytes and retired 60,393,911,436:
+**+678,272,404 bytes** of physical shard storage. Although their logical
+payload is 149,448,661 bytes smaller, an older retained QMUL-bird version
+still owns 827,721,065 bytes of the former payload. Salford added 738,272,785
+bytes; `ro-release-uavir-381a84` added 17,010,766,942 for UaVirBASE. Across
+both jobs, unique R2 shard bytes increased by **18,427,312,131**, from
+577,434,893,727 to 595,862,205,858. Raw acquisition ZIPs were not uploaded.
+All 202 pre-existing orphan shards were left alone; ICSV31 and the raw AuDroK
+parent were unchanged. Rollback copies and publication/readback receipts are
+under `hns-uni-publish-20261126/releaseops/` in Apocrita scratch.
+
+Salford's duplicated M5 file keeps both publisher IDs without duplicating
+the waveform. UaVirBASE's 132 sidecars put at least 8.178 s between native
+takes. Each Frame keeps the source JSON verbatim, WGS84 microphone metadata
+and an eight-row, channel-labeled local ENU `mic_pos`. The recorder's weather
+timestamps and wall clock are not silently synchronized; pose is a take-level
+label, not a trajectory or RPM track. Every one of the 1,056 channel hashes
+matches the publisher's PCM. Full-scale samples in the source remain intact.
+
+In [ICSV31's filename specification](https://github.com/ICSV31AIchallenge/ICSV31-AI-Challenge#dataset-composition),
+`Front`, `Back`, `Right`, `Left`, `Clockwise` and `CounterClockwise` are
+**commanded movements of the tethered aircraft**, not microphone IDs. The
+numeric suffix identifies a challenge file, not its acquisition timestamp.
+Do not stack the six directions or join their independently noise-mixed clips
+by index.
+
+**Healthy subsets without copying audio.** `python scripts/r2sync.py pull
+uni-publish-20261126/reports/healthy` retrieves the versioned key lists into
+`results/uni-publish-20261126/reports/healthy/`. Choose the
+`NAME@FULL_VERSION.keys.txt.gz` matching `dload.lock`; the previous KAIST
+selector is retained for rollback, not for selecting new keys. Every selected
+key is a normal underlying rig in a mixture; disputed labels are excluded.
+
+| Selector | Train | Valid/eval | Test | Total |
+|---|---:|---:|---:|---:|
+| `KAIST-drone-fault-frames@dc72a3f825fc` | 21,600 | 7,022 | 7,000 | 35,622 |
+| `ICSV31-drone-anomaly-frames@4283d7085731` | 5,400 | 540 | 720 | 6,660 |
+
+The compressed KAIST selector for `dc72a3f825fc` has SHA-256
+`1c8ccf7fbc93bc815e90dca2b9a8e436224622a9adcae6300c1a2e64c5f0afc4`.
+
+Calibration evidence for AIRA and KU Leuven:
+`r2://ml-data/artifacts/acoustic-frames-20261126/geometry/b45589045c66496ccffe533800cb7bea852f12dc9b50b3b0253013760147e733.zip`
+(SHA-256 is the basename). It contains the two AIRA delay matrices and the
+scripts to extract/refit them, plus the coordinate reconstruction from the KU
+Leuven paper's original plots. It contains no waveforms.
+
+Chirocopter readback accounted for all 2,938,794 decoded telemetry rows,
+including 230 backward/duplicate-counter OSD rows kept without invented
+timestamps. The [per-flight clock fits](../src/data_processing/sources/chirocopter_clocks.json)
+align the six motor commands with acoustic power. Uncertainty is ±0.5 s on
+12 flights, ±1.0 s on FLY104 and ±1.5 s on FLY113; recorder timestamps alone
+differed from the GPS/audio fits by 73–86 s. The 250 kHz files retain audible
+energy (notably 170–590 Hz peaks in louder flight excerpts); no calibrated
+speech-band microphone response is available. [Fu et al.](https://doi.org/10.1111/2041-210X.12992)
+recorded full-spectrum audio at 250 kHz. The 16 kHz eighth-order Butterworth
+in [Kloepper & Kinniry, Methods and Fig. 1](https://doi.org/10.1038/s41598-018-26122-z)
+was applied to **extracted bat calls**. The 14 deposited flight WAVs last
+462.084–673.742 s; the eight separate baffle-test WAVs each really contain
+12,500 samples (50 ms) at the same rate.
+
+The SDU 1 m mono WAV's BWF header names `Avisoft-RECORDER`. Its reference
+of 25,821,184 samples at 375 kHz is 68.85649 s from the start of monitoring
+([recorder manual](https://www.avisoft.com/RECORDER.pdf)), not a clock shared
+with the array WAVs. Neither the levels nor the header's implausible calendar
+date establish a calibrated hardware response or absolute time.
+The [SDU methods](https://doi.org/10.1002/ece3.9577) specify a 151 kHz
+anti-alias filter plus either a 16 kHz first-order or 9 kHz second-order
+hardware high-pass; no per-file setting is given. The four bat excerpts are
+300 kHz, the five noise/control recordings 375 kHz. Durations span 5–20 s,
+not a time-expanded file format.
+
+**Excluded on licensing grounds:** [HISSandaROAR SD024](https://hissandaroar.com/v3/tech-support/)
+(vendor FAQ 6 and 15: standard licences prohibit ML) and [Audio Shade
+Quadcopter Flight](https://audioshade.com/legal) (audio research expressly
+excluded; [A Sound Effect EULA §3.3](https://www.asoundeffect.com/license-agreement/)
+also excludes non-commercial ML). Neither previews nor purchased standard
+copies are a source for the training corpus.
+
 ## Pinned catalog (`dload.lock`)
 
 Tests assert every `dload.lock` name is a `SPECS` entry, a `sources.REGISTRY`
@@ -476,11 +678,11 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
   `zenodo_drone_noises`, `new_motor_data` (November 2026: FLY013 in `10_Nov/`,
   FLY018 in `14_Nov/`, FLY022 in `15_Nov/`). Each session includes its original
   DJI DAT, DatCon CSV and stereo ZOOM WAV; the first two also include a JPG.
-  External raws kept only in dload (no local copy, no frames builder yet):
-  `UOEMD-VAFCVS` (University of Ottawa induction-motor vibration + acoustic
-  faults, Mendeley `msxs4vj48g` v2, 257 files) and `AuDroK` (all seven Mobilithek
-  distributions of the AUDROK drone sound data: `Measurements_*` XML containers
-  of base64 WAVs, `Dresden-II-S-{A,B}` outdoor WAVs, `Angebotsbeschreibung.xml`).
+  [`UOEMD-VAFCVS`](https://doi.org/10.17632/msxs4vj48g.2) has 128 distinct
+  motor runs, each with one microphone plus synchronized vibration and
+  temperature. Its 257 files are the CSV/MAT versions of those runs and a
+  shared time vector, not consecutive fragments or separate microphones.
+  `AuDroK` stays pinned as the immutable XML/WAV parent of `AuDroK-frames`.
 - **Derived DREGON-LM** (17, `sample-dir-v1`, per split):
   `DREGON-LM-{train,valid}`, `DREGON-LM-V2-{train,valid}`,
   `DREGON-LM-V3-{train,valid}`, `DREGON-LM-V4-{train,valid}`,
