@@ -42,18 +42,19 @@ class MelCepstrum(SpectralFrontEnd):
         return (n_samples + 2 * (self.n_fft // 2) - self.n_fft) // self.hop_length + 1
 
     def forward(self, audio: Tensor) -> Tensor:
-        # FFTs need at least fp32 (e.g. with a model explicitly cast to bf16).
-        dtype = torch.promote_types(self.window.dtype, torch.float32)
-        spectrum = torch.stft(  # pyright: ignore[reportPrivateImportUsage]
-            audio.to(dtype=dtype),
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            window=self.window.to(dtype=dtype),
-            pad_mode="constant",
-            return_complex=True,
-        )
-        real, imag = spectrum.real, spectrum.imag
-        power = real.square().addcmul(imag, imag)
-        mel = self.mel_filters @ power.to(dtype=self.mel_filters.dtype)
-        cepstrum = torch.fft.irfft(power.clamp_min(1e-10).log(), n=self.n_fft, dim=1)
-        return torch.stack((mel, cepstrum[:, : self.n_bins].square().to(mel.dtype)), dim=1)
+        # fp32 always: training audio reaches 1e5 bin power, past fp16's 65504,
+        # and an inf mel bin poisons the BatchNorm running stats with NaN.
+        with torch.autocast(audio.device.type, enabled=False):
+            spectrum = torch.stft(  # pyright: ignore[reportPrivateImportUsage]
+                audio.float(),
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                window=self.window.float(),
+                pad_mode="constant",
+                return_complex=True,
+            )
+            real, imag = spectrum.real, spectrum.imag
+            power = real.square().addcmul(imag, imag)
+            mel = self.mel_filters.float() @ power
+            cepstrum = torch.fft.irfft(power.clamp_min(1e-10).log(), n=self.n_fft, dim=1)
+            return torch.stack((mel, cepstrum[:, : self.n_bins].square()), dim=1)
