@@ -182,6 +182,7 @@ class RPSPredictionCodec:
     ``use_cond=True`` (the conditional-refiner variant — see
     ``tasks.task.rps_prediction``) additionally pulls ``"rps_cond"`` and calls
     ``model(mixture, cond)``.
+    ``predict_activity=True`` also wraps the model's per-frame activity logits.
     """
 
     def __init__(
@@ -191,10 +192,12 @@ class RPSPredictionCodec:
         sr: tuple[int, int] = AUDIO_RATE,
         frame_rate: tuple[int, int] | None = None,
         use_cond: bool = False,
+        predict_activity: bool = False,
     ) -> None:
         self.sr = sr
         self.frame_rate = frame_rate
         self.use_cond = use_cond
+        self.predict_activity = predict_activity
         self._audio_dims = _audio_dims(n_channels)
 
     def to_inputs(self, batch: td.Frame) -> dict[str, torch.Tensor]:
@@ -204,15 +207,23 @@ class RPSPredictionCodec:
         return inputs
 
     def to_frame(self, outputs: Any, batch: td.Frame) -> td.Frame:
-        rps_pred, _aux = _split_model_output(outputs)
-        return td.Frame(
-            {"rps_pred": _batched_series(rps_pred, ("batch", "rotor", "time"), self.frame_rate)}
-        )
+        rps_pred, activity_logits = _split_model_output(outputs)
+        entries = {
+            "rps_pred": _batched_series(rps_pred, ("batch", "rotor", "time"), self.frame_rate)
+        }
+        if self.predict_activity:
+            if activity_logits is None:
+                raise ValueError("RPS model did not return activity logits")
+            entries["activity_logits"] = _batched_series(
+                activity_logits, ("batch", "time"), self.frame_rate
+            )
+        return td.Frame(entries)
 
     def call_model(self, model: Any, inputs: dict[str, torch.Tensor]) -> Any:
-        if self.use_cond:
-            return model(inputs["mixture"], inputs["rps_cond"])
-        return model(inputs["mixture"])
+        args = (inputs["mixture"], inputs["rps_cond"]) if self.use_cond else (inputs["mixture"],)
+        if self.predict_activity:
+            return model(*args, return_activity=True)
+        return model(*args)
 
 
 class SalienceRPSCodec:

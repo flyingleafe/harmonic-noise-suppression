@@ -1,0 +1,16 @@
+# Marcoux & Grondin (ICRA 2026), §II-A only: the two fastest rotors, not four identities.
+task: rps_prediction
+task_params:
+  n_channels: null
+  sr: [16000, 1]
+  frame_rate: [16000, 512]
+  predict_activity: true
+_target_: models.registry.build_model
+params:
+  name: marcoux_grondin_rps
+  n_fft: 2048
+  hop_length: 512
+  num_rotors: 2
+  num_blades: 2
+model_type: null
+legacy_config_path: null

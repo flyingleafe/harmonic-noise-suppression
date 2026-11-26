@@ -734,6 +734,26 @@ Configs which the rewrite leaves out of the paper are kept but not run:
 
 The synthetic pretraining grid is in `rp-synthetic.md`, § "Paper grid".
 
+### Marcoux–Grondin baseline rows (2026-11-26)
+
+Two new Table IV rows for the BPF estimator of Marcoux & Grondin (ICRA 2026,
+arXiv:2602.09991; no reference code or weights published), the CRNN of its
+§II-A: mel power + power cepstrum, four parallel CNN blocks, separate
+3-layer BiGRU speed and activity branches, 26.6M parameters. The paper
+predicts the two fastest BPFs sorted per frame, which the four-rotor panel
+cannot score, so both runs train the adaptation `marcoux_grondin_rps4`: four
+unsorted tracks with clip-level PIT in BPF Hz, activity BCE with target 1
+where any rotor turns, and speeds multiplied by the 0/1 decision
+`activity_logit > 0` (off frames are exactly 0 rev/s). Code and the
+reconstruction choices: `src/tasks/rps-prediction/AGENTS.md`.
+
+| run | stream | config |
+|---|---|---|
+| `rp_marcoux_grondin_all` | `all` | batch 128 × 1, max LR 1e-3 (the paper states none; the regressor rows' value), `rps` metrics |
+| `rp_marcoux_grondin_alllab` | `alllab` | same |
+
+Both on `isambard` (one GH200), everything else as the other `rp_*` rows.
+
 ## Implementation notes (for the cutover)
 
 - `conf/validation/`: new panel config (datasets = the new derived split;

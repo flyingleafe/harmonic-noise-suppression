@@ -61,6 +61,7 @@ from models.harmonic_ports import (
     HPPNetRPS,
 )
 from models.hg_ckla import HGCKLARefiner
+from models.marcoux_grondin import MarcouxGrondinRPS, MarcouxGrondinRPS4
 from models.multif0.rps_predictor import MultiF0RPSPredictor
 from models.rps_predictor import (
     DCCRNEncRPS,
@@ -123,6 +124,8 @@ def _build_edge_bs_rof_rps(**kw: Any):
 
 
 RPS_MODEL_REGISTRY: dict[str, Any] = {
+    "marcoux_grondin_rps": MarcouxGrondinRPS,
+    "marcoux_grondin_rps4": MarcouxGrondinRPS4,
     "simple_conv": SimpleConv,
     "simple_conv_v2": SimpleConvV2,
     "simple_conv_v2_tcn": SimpleConvV2TCN,

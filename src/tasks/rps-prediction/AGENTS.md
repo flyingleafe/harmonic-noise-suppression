@@ -3,6 +3,7 @@
 Predict rotor speed (RPS, in Hz) from drone noise audio on a per-STFT-frame
 grid.  Input is raw audio, output is a 4-rotor RPS trajectory resampled to the
 STFT hop grid.
+The Marcoux–Grondin baseline is a two-fastest-rotor exception; see below.
 
 ## Model interface
 
@@ -108,6 +109,39 @@ family).  The front-end handles STFT/HCQT/whatever; the model only sees a
 | SimpleConv family | `simple_conv` … | STFT mag (1ch) or mag+phase (3ch) | 2D CNN encoder → frequency pool → Conv1d/BiGRU/TCN head |
 | DCUNetEncRPS | `dcunet_enc_rps` | inline complex STFT | DCUNet complex-conv encoder → mean pool → Conv1d head |
 | MultiF0RPSPredictor | `multif0_rps` | HCQT (10ch) | LateDeep CNN → sigmoid salience → soft-centroid → RPS |
+| MarcouxGrondinRPS | `marcoux_grondin_rps` | 128-bin mel power + 128-bin power cepstrum | Four parallel CNN blocks → separate 3-layer BiGRUs for BPF and activity |
+| MarcouxGrondinRPS4 | `marcoux_grondin_rps4` | same | Same network, four unsorted tracks (PIT), speeds gated by activity |
+
+### Marcoux–Grondin baseline
+
+Reimplemented from [§II-A, Tables I–III](https://arxiv.org/html/2602.09991v1#S2.SS1).
+The authors' [d3set repository](https://github.com/introlab/d3set) provides
+recordings and saved predictions, but no estimator source or weights were found.
+This port does not include delivery detection.
+
+`model=marcoux_grondin_rps loss=marcoux_grondin_rps metrics=none` selects the
+model and its objective; use a mono 16 kHz data group with aligned RPS
+telemetry and `validation=disabled` for loss-based validation. The loss
+compares the two fastest rates per frame in BPF Hz and supervises activity
+with 1 where any rotor turns (speed > 0). Keep blade count consistent with
+the rig (`model.params.num_blades`, default 2). Activity logits are separate
+from the ungated RPS output; apply sigmoid to get probabilities.
+
+Use two fastest **per-frame ranks** on both sides of an RPS comparison.
+Do not use `loss=pit_mse` (it can silently score the wrong telemetry rows),
+the four-rotor metrics/panel, or the legacy `Type@ckpt` loader (it forces
+four outputs). The paper uses 93-frame sequences; the port preserves
+`N // 512 + 1` frames for any clip length. Hann window, centered zero padding,
+Slaney power mel, and squared real cepstrum with a log-power floor of
+`1e-10` are reconstruction choices where the paper is silent.
+
+**Adaptation** (not in the paper): `model=marcoux_grondin_rps4
+loss=marcoux_grondin_rps4` predicts one unsorted track per rotor, trained
+with clip-level PIT in BPF Hz plus the same activity loss. Speeds are
+multiplied by the 0/1 decision `activity_logit > 0` in training and
+inference, so an off frame is exactly 0 rev/s; the decision has no gradient
+and learns from its own loss. Output is four-rotor, so the standard PIT
+metrics, `validation=rp_real` and `Type@ckpt` loading apply.
 
 ## Evaluation
 

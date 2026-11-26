@@ -1,0 +1,9 @@
+# Eq. 2 of the paper with clip-level PIT over four rotor tracks.
+terms:
+  - name: bpf_activity
+    _target_: losses.marcoux_grondin.MarcouxGrondinLoss
+    weight: 1.0
+    params:
+      rate: ${model.task_params.frame_rate}
+      num_blades: ${model.params.num_blades}
+      matching: pit

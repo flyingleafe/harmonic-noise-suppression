@@ -1,0 +1,20 @@
+# @package _global_
+# Baseline row: Marcoux & Grondin CRNN, four-track activity-gated adaptation, on the rp_all stream. Batch doc: docs/experiments/paper-real-protocol.md.
+defaults:
+  - override /data: rp_real
+  - override /model: marcoux_grondin_rps4
+  - override /loss: marcoux_grondin_rps4
+  - override /metrics: rps
+  - override /validation: rp_real
+  - _self_
+
+experiment_name: rp_marcoux_grondin_all
+batch_size: 128
+grad_accum_steps: 1
+num_workers: 6
+data:
+  train:
+    params:
+      path: conf/online_mix/rp_all.yaml
+optim:
+  lr: 1.0e-3  # the paper states no LR; the regressor rows' max LR (Conv+BiGRU)
