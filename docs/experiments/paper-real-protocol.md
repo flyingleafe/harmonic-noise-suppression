@@ -752,7 +752,11 @@ reconstruction choices: `src/tasks/rps-prediction/AGENTS.md`.
 | `rp_marcoux_grondin_all` | `all` | batch 128 × 1, max LR 1e-3 (the paper states none; the regressor rows' value), `rps` metrics |
 | `rp_marcoux_grondin_alllab` | `alllab` | same |
 
-Both on `isambard` (one GH200), everything else as the other `rp_*` rows.
+Both submitted 2026-11-26 to `isambard` (one GH200, 16 cores, 96 GB) at
+`83ee20d3`: omnirun `rp-marcoux-grondin-all-15e39d` and
+`rp-marcoux-grondin-allla-43fd03`. Everything else as the other `rp_*` rows;
+the Table IV cells are read at the lowest five-round median of `real_macro`
+(`scripts/rp_history.py --best`).
 
 ## Implementation notes (for the cutover)
 
