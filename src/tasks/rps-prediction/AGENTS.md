@@ -109,7 +109,7 @@ family).  The front-end handles STFT/HCQT/whatever; the model only sees a
 | SimpleConv family | `simple_conv` … | STFT mag (1ch) or mag+phase (3ch) | 2D CNN encoder → frequency pool → Conv1d/BiGRU/TCN head |
 | DCUNetEncRPS | `dcunet_enc_rps` | inline complex STFT | DCUNet complex-conv encoder → mean pool → Conv1d head |
 | MultiF0RPSPredictor | `multif0_rps` | HCQT (10ch) | LateDeep CNN → sigmoid salience → soft-centroid → RPS |
-| MarcouxGrondinRPS | `marcoux_grondin_rps` | 128-bin mel power + 128-bin power cepstrum | Four parallel CNN blocks → separate 3-layer BiGRUs for BPF and activity |
+| MarcouxGrondinRPS | `marcoux_grondin_rps` | 128-bin log-mel + 128-bin power cepstrum | Four parallel CNN blocks → separate 3-layer BiGRUs for BPF and activity |
 | MarcouxGrondinRPS4 | `marcoux_grondin_rps4` | same | Same network, four unsorted tracks (PIT), speeds gated by activity |
 
 ### Marcoux–Grondin baseline

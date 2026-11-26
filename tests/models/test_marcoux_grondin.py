@@ -31,7 +31,6 @@ def test_cepstrum_places_periodic_energy_at_the_period():
     audio[:, ::64] = 1.0
     features = frontend(audio)
     center = features[0, :, :, 4]
-    assert center[0].min() >= 0
     assert center[1, 1:].argmax().item() + 1 == 64
     assert torch.isfinite(frontend(torch.zeros_like(audio))).all()
 

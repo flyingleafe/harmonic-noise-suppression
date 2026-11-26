@@ -8,12 +8,14 @@ from . import SpectralFrontEnd, register_frontend
 
 @register_frontend
 class MelCepstrum(SpectralFrontEnd):
-    """Stack 128 power-mel bins and the first 128 power-cepstrum bins.
+    """Stack 128 log-mel bins and the first 128 power-cepstrum bins.
 
-    The paper does not specify the window, mel scale or log floor. Use a
-    periodic Hann window, Slaney-normalized Slaney mel filters, and a power
-    floor of 1e-10 before taking the natural log for the cepstrum. Both
-    channels share the repository's centered, 16 kHz STFT grid.
+    The paper does not specify the window, mel scale, mel compression or log
+    floor. Use a periodic Hann window, Slaney-normalized Slaney mel filters,
+    and the natural log of mel power and of STFT power (for the cepstrum),
+    both floored at 1e-10. Linear mel power was tried first: its heavy tail
+    (single bins 300 standard deviations out) overflowed the fp16 first conv
+    in training. Both channels share the centered, 16 kHz STFT grid.
     """
 
     key = "mel_cepstrum"
@@ -55,6 +57,6 @@ class MelCepstrum(SpectralFrontEnd):
             )
             real, imag = spectrum.real, spectrum.imag
             power = real.square().addcmul(imag, imag)
-            mel = self.mel_filters.float() @ power
+            mel = (self.mel_filters.float() @ power).clamp_min(1e-10).log()
             cepstrum = torch.fft.irfft(power.clamp_min(1e-10).log(), n=self.n_fft, dim=1)
             return torch.stack((mel, cepstrum[:, : self.n_bins].square()), dim=1)
