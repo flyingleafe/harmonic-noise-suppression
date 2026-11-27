@@ -476,14 +476,47 @@ data keys and 21 `_meta` records in 65 parent versions. These are *not*
 negative controls and logs are distinguished by provenance. A superseded
 pin without its own index never inherits annotations by matching a filename.
 
-Of the 583,708 audio-bearing keys, 1,620 are classified `constant`: 394
-have `resolved` tachometry, 1,023 `partial`, and 203 `unresolved`. The pass
-also examined potential plateaux in mixed or undocumented runs. Across all
+**Fixed-throttle census (original recordings).** Across the 65 indexed parents,
+608 original recording units qualify as `constant`, including documented fixed
+commands with actual RPM drift. Count simultaneous microphones once; exclude
+resampled copies, derivatives, digital mixtures, controls and simulations.
+Sound physically recorded alongside the motors does **not** exclude a take.
+
+| Source | Recording units | Explicitly drone-only |
+|---|---:|---:|
+| [DroneAudioSet](https://arxiv.org/abs/2510.15383), low/high in §3.2 and Table 2 | 560 | 56 |
+| [DREGON](https://dregon.inria.fr/datasets/dregon/), one commanded shaft speed | 21 | 21 |
+| SPCup19: AGH, Maverick, [NSS Chellamma](https://dregon.inria.fr/SPCup2019_egonoise/SPCUP19_NSS_Chellamma_documentation.pdf) | 16 | 15 |
+| [AVQ](https://webspace.eecs.qmul.ac.uk/lin.wang/demo/avq_files/table.jpg), fixed throttle | 6 | 4 |
+| [KU Leuven](https://arxiv.org/abs/2211.02690), fixed joystick setting with live speech | 3 | 0 |
+| [Acoustic Sensing](https://doi.org/10.1109/ACCESS.2023.3253719), Table 2: `n121` constant 100%; `n122` dynamic | 1 | 1 |
+| [Salford](https://doi.org/10.61782/fa.2023.0249), §3 Fig. 5: acoustically steady M3 hover; throttle not stated | 1 | 1 |
+| **Total** | **608** | **98** |
+
+For reproduction, filter `has_audio=True`, `provenance_kind="recording"`,
+`speed_regime="constant"`. For DroneAudioSet group the three mic paths
+by **all** publisher path fields except microphone identity, retaining the
+`File1`–`File6` or `silence` suffix. The 1,680 qualifying files represent
+560 segments in 80 experimental configurations (280 low, 280 high segments);
+the number of motor starts is not documented. The other 48 original keys are
+already grouped. No other dataset in the inventory established a qualifying run:
+a current bin (ANU), an altitude hold (ChuMS), or an unmapped calibration
+without released audio (D3SET) does not establish a fixed-throttle recording.
+
+Release `drone-recording-annotations@497ea2c5828a` has 3,398 constant audio
+entries, including 1,728 with `provenance_kind="recording"` before microphone
+grouping. `ca-throttle-stage-f68c6e` verified that the new classifications
+changed no waveform locator, estimated rotor speed, wind result or measurement.
+
+In the initial acoustic release (`e129e424098f`), 1,620 of the 583,708
+audio-bearing keys met the earlier `constant` rule: 394 `resolved`, 1,023
+`partial`, and 203 `unresolved`. The pass also examined potential plateaux
+in mixed or undocumented runs. Across all
 parents it accepted 94,570 individual rates in 53,704 time windows. Of
 these, 1,621 windows on 389 keys resolve **four of four**; a four-rate window
 on a six-rotor aircraft is partial and is not included in that count.
 `ca-spectrum-final-proof-608e6b` checked every source key and every finite
-rate. The verified release `drone-recording-annotations@e129e424098f` is
+rate. That release is
 135,243,992 bytes on R2 (one gzip-compressed SQLite index per parent), with
 no audio payload or change to a parent pin. `ca-publish-channel-316deb`
 read back all 65 indexes and matched their staged SHA-256 digests.
@@ -518,7 +551,7 @@ does not grant permission to redistribute a parent recording.
 | Filter | What the value describes |
 |---|---|
 | `rig_mount` | Aircraft constrained on a stand, tethered, grounded, handheld or in free flight; not the location of the mic. |
-| `speed_regime` | Shaft speeds during operation. A dedicated single-setting run can be steady on its motor-on span despite some drift or a silent lead-in. Different operating plateaux, significant ramps and stops can make a take `mixed`. A fixed airframe alone proves nothing about RPM. |
+| `speed_regime` | Operating regime. One stated fixed throttle, power or shaft-speed setting during the motor-on run counts as `constant`, even when the measured RPM drifts. Without such a protocol, use source or measurement evidence for steady, changing or mixed operation. A hover, a fixed airframe or a motor-current label alone is not a fixed throttle. |
 | `propulsion`, `rotor_activity` | Propeller installed vs bare shaft; one, all, a subset or no active rotors. Counts are `n_active` and `n_rotors`, not hard-coded to four. |
 | `relative_motion` | Motion of the **hubs relative to the microphones**. Onboard mics can be fixed in free flight. A nominal fixed-position external hover is not a rigid attachment. Inspect `role_motion` on multi-recorder Frames. |
 | `speed_supplied` | Whether shaft speed is supplied, including run labels; `supplied_kind` distinguishes measurements, commands, nominal/run means and calibrated BPF. Current, throttle and PWM alone are not speed. Acoustic estimates do not change this field. |
@@ -921,7 +954,7 @@ entry, or listed in `ARTEFACT_PINS` / `HISTORICAL_PINS`.
 - **noise-model-v2 bench/static fit points** (1, `tdframe-v1`):
   `noise-v2-bench-points` (135; every static/bench drone-noise recording the
   project holds that yields one speed per rotor — 20 DREGON single-motor bench
-  runs at 50–90 % throttle + the four-motor `allMotors_70` control, 7 SPCUP19
+  runs at nominal 50–90 turns/s + the four-motor `allMotors_70` control, 7 SPCUP19
   AGH single-rotor takes + 7 four-rotor SPCUP19 stationary windows over 3 team
   rigs, 2 SPCUP19 ChuMS propeller-rig runs (2 and 3 propellers), 92
   DroneAudioSet `drone-only` recordings over 4 design cells, 6 AVQ
