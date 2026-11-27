@@ -659,3 +659,194 @@ The four-powered-rotor DREGON `allMotors_70` is the counterexample to
 distinct families across the take; the blind full-rig check abstains.
 Use [the recording-condition index](../data-catalog.md#recording-annotations)
 to retrieve supported intervals without replacing any measured motor series.
+
+## Close-rotor resolution pilot: protocol (2026-11-27)
+
+**Decision.** Test whether complex phase across time, orders and microphones
+recovers additional shaft rates at a controlled false-split rate. Freeze
+`drone-recording-annotations@497ea2c5828a` as baseline. Of 580 four-rotor
+recording units, 186 resolve four simultaneously at least once; the remaining
+28 of the 608 are single-rotor. Score both take-level recovery and the
+fraction of active time covered. Distinguish an unordered set of shaft rates
+from assignment to physical motors, and a smoothed prediction from a local
+measurement.
+
+**Testable signal.** At shaft order \(k\) two nearby steady rates produce a
+cross term in power at \(k|f_1-f_2|\). Different mic responses change beat
+depth and phase, not that frequency. For drifting rates replace the linear
+phase difference by \(2\pi k\int(f_1-f_2)\,dt\). Equal phase-locked rates with
+fixed mixing have no beat: with unconstrained complex gains, the two steering
+vectors times their amplitudes simply add to one observed vector per order.
+A known four-rotor rig does not fix this acoustic identifiability problem.
+Independent fluctuations or previously measured, linearly independent spatial
+signatures can add information. Neither is guaranteed. A *single* DREGON
+rotor already gives several dB of amplitude modulation (§ Round 3).
+
+1. **Freeze controls and clocks.** Use the 20 DREGON and 8 AGH singles for
+   the one-shaft null and split them by take into development and test.
+   Construct multichannel mixtures of held-out single-shaft recordings,
+   applying each resampling map to every mic of that source; keep the imposed
+   separations and the uncertainty of each isolated rate. Use exact synthetic
+   controls for zero separation, near ties, crossings, missing harmonics,
+   a weak fourth shaft and one amplitude-modulated source with sidebands.
+   Include speech with motors off. Split DroneAudioSet by configuration
+   (all mic views and file segments together). Verify common events, offsets
+   and clock drift before fusing recordings; otherwise fit within each array
+   and compare noncoherent evidence across views only when times correspond.
+2. **Test the minimum new estimator: one disputed pair.** Seed from
+   `tracking.steady_tachometry`, `experiments.static_rig.joint_speeds` and the
+   existing `pair_mode="joint"` two-tone fit. Search both sides of a *single*
+   seed as well as pairs of peaks: an unresolved doublet need not produce two
+   peaks. Use complex downconverted data from informative harmonic bands.
+   For each pair of off-grid shaft rates (then local linear drifts), solve
+   the conditional complex gain problem jointly on synchronized microphones
+   by whitened QR/SVD. Gains may differ by microphone and order, but must not
+   be free per sample. Fit one modulated shaft versus two shafts; constrain
+   amplitude variation and phase noise using single-rotor controls. Explicitly
+   test half/double/triple-rate aliases. Use the full separation profile, not
+   just the optimum or its Hessian. This is a local extension of
+   [nonlinear least-squares multipitch estimation](https://doi.org/10.1109/ICASSP.2007.367063)
+   and [Bretthorst's joint frequency inference](https://doi.org/10.1007/978-1-4684-9399-3).
+3. **Make a split predict new data.** Estimate rates on one time block and
+   subset of orders. For held-out mics/orders, estimate *their* gains only on
+   a calibration block, then compare predictions on an untouched block. Score
+   the same observations and noise model for both hypotheses. Calibrate the
+   searched maximum improvement under the modulated single-shaft null (including
+   the entire candidate search); the equal-frequency limit is singular, so a
+   nominal likelihood-ratio chi-square cutoff is inappropriate. Report false
+   splits, missed pairs, matched frequency errors, interval coverage and
+   minimum recoverable separation versus duration, relative level and SNR.
+   Do not count fitted test gains or neighboring overlapping windows as
+   independent corroboration.
+4. **Use slow drift only after the static pair test passes.** Anchor a pair
+   where the shafts separate; smooth their frequency and integrated phase
+   forward and backward to the disputed interval. Compare with the same
+   smoother that ignores phase. Report uncertainty in separation and allow
+   label swaps at crossings. Mark unsupported spans as prediction-only.
+   Use the existing 56 DroneAudioSet drone-only segments, three KU Leuven
+   runs (especially the four under-rotor mics), AVQ crossings, and DREGON
+   `allMotors_70` as the first real panel; do not treat previous acoustic
+   readings or KU Leuven's single laser average as four-shaft ground truth.
+   Use withheld synchronized shaft telemetry on other rigs for an independent
+   error check; keep telemetry-assisted and blind results separate.
+5. **Decision and rollout.** Proposed pilot targets, not achieved results:
+   no material loss on separated controls; at most 1% false splits on the
+   prespecified independent synthetic null trials (report a binomial interval
+   and real-single results separately); improved close-pair recall over the
+   best existing baseline at the same false-split rate. Require real held-out
+   predictive improvement and report complete active seconds gained as well
+   as additional four-of-four takes. Run the pilot on `omnirun` `uni-cpu`;
+   only then batch qualifying cases. If a collision remains ambiguous, publish
+   the supported common rate and separation interval, multiplicity unknown.
+   To resolve physical shafts in such cases, acquire synchronous per-motor
+   tach/ESC or optical phase references, or isolated-rotor calibration on the
+   same rig and mic geometry. Do not turn the four-installed constraint into
+   four measurements. No release changes until the gates pass.
+
+**Frozen cohort and reporting.** `497ea2c5828a` is the baseline, not refs/latest.
+The exact original-source manifest is `results/static_rig/constant_recording_annotations_497ea2c5828a.tsv`
+(SHA-256 `303927e49df22b93a66124e92bad6d3bcc7765a890edf35b844e2ec078d51cc8`).
+Of 608 groups, 21 were resolved, 557 partial, and 30 had no accepted speed.
+Of the partials, 193 had at least one complete simultaneous window. Only
+promote observations that pass the independent controls; never relax a cutoff
+on the sealed trials or fill another rotor/another time span with a proposal.
+
+`scripts/close_pair_inventory.py --release FULL_SHA --out results/close_pair_inventory`
+reproduces the mutually exclusive lists plus the parent key and window
+coverage for every view. Each group's coverage seconds are the union of
+windows **within one stated source clock**. The strongest view for count and
+the best view for covered duration need not be the same; all three DroneAudioSet
+view summaries are retained, not stitched together.
+
+**Recorder clocks.** `pair-clock-bound-cd53c3` (`uni-cpu`) checked five
+1.75 s spans per drone-only group at native rate. GCC-PHAT in disjoint
+400–1700 and 2100–5400 Hz bands suppressed the largest tonal bins. An
+affine lag fitted on three spans had to predict the other two within half
+a sample, with unique peaks in both bands. Upper/lower arrays passed in
+23/56 groups (fitted relative drift −3.18 to −2.09 ppm); neither
+array-to-centre pairing passed in any group. Even two channels of the
+same array passed in only 7/56: absence of a sharp common broadband event
+is **not** proof of a different clock. The primary pilot therefore keeps
+the views separate. The 23 candidates for alignment require their fitted
+offset/drift correction, not simple concatenation of channels.
+
+**Estimator and sealed comparison.** Exact executed source: R2 artifact
+`static_rig/close_pair_source_9ce20cfe6a2a/snapshot.tgz`. The
+`fit_pair` fit uses a 48% discovery prefix, 26% gain-calibration block and
+26% test block. Score is the fractional squared-error reduction on unseen
+orders and/or microphones in that final block, relative to a modulated
+one-shaft model. The real panel adds a separate prediction suffix. Check
+structural eligibility before the score; an ineligible pair can still have
+finite rates in the diagnostic files. Neither the fitted rates nor the raw
+score alone are annotations.
+
+`close-pair-cal-v2-f7bc63` froze `score > 0.6029884518122534` on
+720 independent synthetic nulls (7 false splits). Threshold JSON SHA-256:
+`3cb8dd76e45eebb6983fa9bcdd4fcb21aea599b42f135be95fe6856ca966950f`.
+The prespecified close-pair endpoint requires *both* sorted rates within
+`min(0.20, 0.30 × actual gap)` rev/s of the generating rates. Compare the
+released peak method, the existing two-tone PI tracker and the joint spectral
+baseline under the same false-split budget. A rejected model leaves all
+published source windows and rates unchanged.
+
+**Real panel — no promotion.** `close-pair-real-score-71d3cc`,
+`close-pair-real-replay-c09c27` (11 bitwise-identical native PCM spans),
+`close-pair-real-upload-81049d`. The scorer examined selected windows from
+66 four-rotor recording groups: 56 DroneAudioSet drone-only segments, six
+AVQ, three KU Leuven and DREGON `allMotors_70`. It gained **zero**
+independently supported four-shaft seconds and zero four-of-four groups.
+7,493.06 s is the baseline assessed active duration of those groups, not
+the duration newly searched. See `results/static_rig/close_pair_real_5393aa0719af/report.json`.
+
+- No false splits on 16 held-out single-rotor takes or 9 speech-only windows
+  from 3 takes. On the 12 development singles, `motor_Motor4_80` falsely
+  split, even with positive prediction on a separate time block.
+- In mixtures of actual single-rotor recordings, one of 20 nonzero-gap
+  trials recovered both rates above threshold (0.5 rev/s apart, weak shaft
+  −12 dB, mean error 0.041 rev/s); none of four nominal ties was split.
+  The six blind MD2 windows with independent ESC feedback yielded no
+  accepted pair.
+- DroneAudioSet `000052_…mic1_soundskrit-File2.wav` yielded a possible
+  78.594/79.298 rev/s split; prediction error on the independent
+  66.65–68.25 s suffix dropped by 54%. Only one other shaft was supported
+  in the discovery fit, so this is not a fourth shaft. Do not borrow the
+  fourth number from the suffix that tested the prediction. Across all
+  real-panel and control calls, the commonest structural rejections were
+  no clean train/test order set (219) and insufficient cross-order support (215).
+
+**Sealed test and decision: stop, no corpus rollout.** `close-pair-test-v2-2b264b`
+completed all 1,904 held-out trials on `uni-cpu`. At the locked cutoff the
+phase test falsely split 11/720 nulls (1.53%, exact 95% CI 0.77–2.72%);
+7 were exact ties and 4 were singles. It failed the prespecified ≤1% point-rate
+gate. On the 576 planted static close pairs the four methods gave:
+
+| Method | Both rates correct at its locked cutoff | Both correct at the same 7/720 false splits (descriptive) |
+|---|---:|---:|
+| Profiled complex phase | 10 | 4 |
+| Released peak estimator | 71 | 78 |
+| Joint harmonic spectral fit | 57 | 60 |
+| Two-tone PI tracker | 9 | 9 |
+
+At the locked cutoffs the phase method's recall minus the best baseline's
+was −10.6 percentage points (paired bootstrap interval −13.5 to −8.0).
+Among 17 accepted close-pair trials its separation support envelope contained
+the true gap only 5 times: **do not interpret it as a calibrated interval**.
+Keeping existing labels and using the phase method only to add a shaft
+improved two-rate matches from 79 to 86/576 in that separate operational
+comparison, at the cost of increasing null splits from 8 to 14/720.
+The estimator recovered no weak fourth shaft in 100 planted weak-fourth
+trials. Time smoothing and cross-view phase fusion were conditional on this
+static gate; neither was rolled out. The result rejects this estimator and
+operating point, not the possibility of resolving more original recordings.
+The [synthetic summary](../../results/static_rig/close_pair_synthetic_9ce20cfe6a2a_37663873/test/summary.json)
+and [real report](../../results/static_rig/close_pair_real_5393aa0719af/report.json)
+are mirrored under the same relative paths in `r2://ml-data/artifacts/`.
+
+**Final inventory:** [557 partial](../../results/close_pair_inventory/partial.tsv),
+[30 unresolved](../../results/close_pair_inventory/unresolved.tsv),
+[21 resolved](../../results/close_pair_inventory/resolved.tsv).
+The metadata-only export is mirrored under `r2://ml-data/artifacts/close_pair_inventory/`.
+Partial includes 193 recordings in which all active shaft rates were obtained
+at least once but not over the whole assessed active span, and 364 for which
+no single window supported every shaft. No parent, annotation pin, or
+waveform was replaced.
