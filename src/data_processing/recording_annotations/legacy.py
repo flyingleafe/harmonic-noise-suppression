@@ -995,6 +995,8 @@ def _avq_raw(key: str, info: dict) -> dict:
                     field="mp4",
                     project_wind=False,
                     lag_note=lag_note,
+                    # A single-window lag is not a verified correspondence: the runner measures directly.
+                    verify="lag" if lag_note.startswith("WEAK") else None,
                 ),
                 f"GoPro video (DOA ground truth) with a {nch}-ch AAC 48 kHz audio track: compatible/probable "
                 f"time-aligned derivative of the same event as the onboard array ({lag:+.4f} s, {lag_note}); "

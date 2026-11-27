@@ -1449,9 +1449,11 @@ def _project(
         out["tach"] = tach
         out["tach_measure"] = {
             **pmeas,
+            "role": c_role,
             "projected_from": dict(link),
             "audio_t_start_s": c_t0,
             "parent_audio_t_start_s": p_t0,
+            "projection_chain": [dict(link), *pmeas.get("projection_chain", [])],
         }
     prole = link.get("role") or "audio"
     if plan["wind"].get("link"):
@@ -1716,7 +1718,32 @@ def _build_worker(unit: Unit) -> dict[str, Any]:
     del units
     planner = _Planner(run, freeze)
     regime_names = _regime_datasets()
-    parent_cache: dict[str, dict[str, Any]] = {}
+    parent_cache = {name: measured}
+    sealed_links: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def resolve_parent(
+        dataset: str, key: str, visited: frozenset[tuple[str, str]]
+    ) -> dict[str, Any]:
+        """Seal and compose each validated link on its own parent/child clock."""
+        address = (dataset, key)
+        if address in visited:
+            raise CampaignError(f"{dataset}/{key}: cyclic observation binding")
+        if address in sealed_links:
+            return sealed_links[address]
+        entry = planner.entry(dataset, key)
+        if entry is None:
+            raise CampaignError(f"{dataset}/{key}: linked parent has no classification")
+        if dataset not in parent_cache:
+            parent_cache[dataset] = _measure_rows(run, dataset, candidate_snapshot)[0]
+        row = _published(parent_cache[dataset].get(key, {}), entry[0])
+        parent_plan = planner(*entry)
+        ancestor = parent_plan["tach"].get("link") or parent_plan["wind"].get("link")
+        if ancestor is not None:
+            upstream = resolve_parent(ancestor["dataset"], ancestor["key"], visited | {address})
+            row.update(_project(ancestor, upstream, parent_plan, *entry))
+        sealed_links[address] = row
+        return row
+
     out_path = _run_paths(run)["staging"] / f"{name}@{d['version']}.sqlite"
     expected: list[str] = []
     rules_counts: dict[str, Counter] = defaultdict(Counter)
@@ -1755,7 +1782,6 @@ def _build_worker(unit: Unit) -> dict[str, Any]:
                 record, info = su["records"][ri], su["infos"][ii]
                 plan = planner(record, info)
                 regime_parent = name in regime_names
-                parent_rows = parent_cache
                 mrow = measured.get(key)
                 results = mrow or {}
                 missing = [
@@ -1774,24 +1800,7 @@ def _build_worker(unit: Unit) -> dict[str, Any]:
                     )
                 link = plan["tach"].get("link") or plan["wind"].get("link")
                 if link is not None:
-                    if link["dataset"] not in parent_rows:
-                        parent_rows[link["dataset"]] = _measure_rows(
-                            run, link["dataset"], candidate_snapshot
-                        )[0]
-                    prow = parent_rows[link["dataset"]].get(link["key"])
-                    if prow is None:
-                        raise CampaignError(
-                            f"{name}/{key}: linked parent {link['dataset']}/{link['key']} "
-                            "has no measurement (measure the parent first)"
-                        )
-                    if "tach_candidates" in prow:
-                        pent = planner.entry(link["dataset"], link["key"])
-                        if pent is None:
-                            raise CampaignError(
-                                f"{name}/{key}: linked parent has no classification"
-                            )
-                        prow = _published(prow, pent[0])
-                        parent_rows[link["dataset"]][link["key"]] = prow
+                    prow = resolve_parent(link["dataset"], link["key"], frozenset({(name, key)}))
                     mrow = {**(mrow or {}), **_project(link, prow, plan, record, info)}
                 if mrow is not None:
                     mrow = _published(mrow, record)
