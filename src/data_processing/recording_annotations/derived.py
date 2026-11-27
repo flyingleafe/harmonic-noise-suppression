@@ -1343,8 +1343,10 @@ def droneaudioset_path_facts(path: str) -> dict:
             "drone 'firmly affixed' to a fixed aluminium frame 1.5 m above ground to emulate hover",
         ),
         speed_regime=(
-            "unknown",
-            f"commanded '{throttle}' throttle; no measured speed — steady commanded take",
+            "constant" if throttle in {"low", "high"} else "unknown",
+            f"one fixed '{throttle}' throttle setting for this acquisition; not measured RPM"
+            if throttle in {"low", "high"}
+            else "no documented fixed throttle setting",
         ),
         propulsion=("propellers", f"{model} with {prop} propellers (Table 4)"),
         rotor_activity=(
@@ -1411,9 +1413,8 @@ def _droneaudioset(dataset: str, key: str, meta: dict, info: dict) -> dict:
 
 # ── survey WAVs (zenodo_drone_noises) ───────────────────────────────────────
 
-#: n116-n120 = the five AVQ ego-noise sequences, n121/n122 = AS (survey §VI). Matched to AVQ
-#: keys by duration: n118 = 40 s = S1_seq3; n116/n117 = 120 s = S1_seq1/S1_seq2 (order not
-#: established); n119/n120 = 215.2/218.7 s vs S2_seq1/S2_seq2 = 210.7/214.2 s (unresolved).
+#: Conservative source candidates for inherited facets; no proven sample-clock binding.
+#: The survey labels each file's operating regime directly in Table 2.
 _SURVEY_AVQ = {
     "n116": ("S1_seq1", "S1_seq2"),
     "n117": ("S1_seq1", "S1_seq2"),
@@ -1421,6 +1422,7 @@ _SURVEY_AVQ = {
     "n119": ("S2_seq1", "S2_seq2"),
     "n120": ("S2_seq1", "S2_seq2"),
 }
+_SURVEY_FIXED_POWER_PCT = {"n116": 50, "n117": 100, "n118": 150, "n119": 100, "n121": 100}
 
 
 def _zenodo(dataset: str, key: str, meta: dict, info: dict) -> dict:
@@ -1462,16 +1464,19 @@ def _zenodo(dataset: str, key: str, meta: dict, info: dict) -> dict:
             ),
             relative_motion=("fixed", "8-mic circular array on top of the MAV body"),
             speed_supplied=("no", "only % of hovering power; no rpm"),
-            speed_regime=(
-                "unknown",
-                "AS ego-noise segments: constant or randomly varying motor speed",
-            ),
             sound_content=("drone_only", "survey uses n121/n122 as pure ego-noise test sequences"),
             environment=("unknown", "acquisition room not stated"),
             blade_count=("unknown", "IRIS propeller not stated in the paper"),
         )
         rec.update(n_rotors=4, n_active=4, tach_candidate=True, tach_role="wav")
         rec["parent"] = {"source": "AS ego-noise (Wang & Cavallaro 2018); no native copy in dload"}
+    if n in _SURVEY_FIXED_POWER_PCT:
+        regime = ("constant", f"{n}: constant ({_SURVEY_FIXED_POWER_PCT[n]}%) noise power")
+    elif n in {"n120", "n122"}:
+        regime = ("variable", f"{n}: dynamic noise power")
+    else:
+        raise ValueError(f"unlisted survey sequence: {n}")
+    _set(rec, f"{_SURVEY}, Table 2", speed_regime=regime)
     rec["source_detail"] = {"survey_split": split, "survey_id": n}
     rec["wind_role"] = "wav"
     return rec

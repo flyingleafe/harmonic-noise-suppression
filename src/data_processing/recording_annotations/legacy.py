@@ -1209,12 +1209,14 @@ _SPCUP_REGIME = {
         "steady ground idle (comb 33.9 Hz), take-off, hover, landing, idle",
     ),
     "NSS_Chellamma__task_audio": (
-        "variable",
-        "motors-off lead/tail around a flight with slowly wandering rotor comb",
+        "constant",
+        "report p.1: the acquisition aimed to 'keep the drone stable and angular speed fixed'; "
+        "no throttle setting or rotor speed supplied, and observed tonal drift does not establish constant actual RPM",
     ),
     "NSS_Chellamma__task_audio_edited": (
-        "variable",
-        "flight with slowly wandering rotor comb (motors-off ends trimmed)",
+        "constant",
+        "Audacity edit of task_audio, inheriting its fixed angular-speed target (report p.1), "
+        "not a measured RPM or throttle setting",
     ),
 }
 _SPCUP_MOUNT = {
@@ -1489,7 +1491,7 @@ def _bench(key: str, info: dict) -> dict:
             file_path=sid,
             start_s=start,
             duration_s=dur,
-            built_from="publisher drone-only parquet (not a key of the DroneAudioSet pin)",
+            built_from="publisher drone-only parquet, not read from the dload pin",
         )
     else:
         raise KeyError(f"noise-v2-bench-points {key!r}: unknown corpus {corpus!r}")

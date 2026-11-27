@@ -168,6 +168,7 @@ def test_droneaudioset_paths():
         "drone-only-recordings/drone1-only/mic-dist-25cm/throttle-high/mic2_8array-down-File2.wav"
     )
     assert rec["rig_mount"] == "fixed_stand" and rec["blade_count"] == "2"
+    assert rec["speed_regime"] == "constant" and rec["speed_supplied"] == "no"
     assert rec["wind"] == "unknown" and "downwash_exposure" in rec["source_detail"]
     assert rec["source_detail"]["model"].startswith("DJI F450") and rec["tach_candidate"]
     src = _norm(
@@ -178,6 +179,7 @@ def test_droneaudioset_paths():
         {},
     )
     assert src["sound_content"] == "no_drone" and src["provenance_kind"] == "control"
+    assert src["speed_regime"] == "not_applicable"
     with pytest.raises(ValueError):
         derived.droneaudioset_path_facts("drone-only-recordings/x.wav")
 
@@ -205,6 +207,17 @@ def test_kaist_half_second_windows_and_icsv_clips():
     assert "tach_skip" not in negative
     icsv = "onboard/tethered/drone-B_normal_artificial-mix/train/train_B_Front_normal_000001"
     assert _norm("ICSV31-drone-anomaly-frames", icsv, {}, {})["tach_candidate"]
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [("n119", "constant"), ("n120", "variable"), ("n121", "constant"), ("n122", "variable")],
+)
+def test_survey_file_operating_regime(key, expected):
+    split = "test" if key in {"n121", "n122"} else "train"
+    rec = _norm("zenodo_drone_noises", f"raw/noises-{split}-drones/{key}", {}, {"has_audio": True})
+    assert rec["speed_regime"] == expected
+    assert rec["speed_supplied"] == "no"
 
 
 def test_simulations():

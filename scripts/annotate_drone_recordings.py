@@ -43,7 +43,7 @@ from utils.gridrun import Unit, add_gridrun_args, gridrun_from_args, unit_path
 
 RELEASE_NAME = "drone-recording-annotations"
 #: Bump on any behavioural change of the runner's selection/merging policy.
-RUNNER_RECIPE = "annotate-drone-recordings/2"
+RUNNER_RECIPE = "annotate-drone-recordings/3"
 #: Bytes of float32 PCM one tachometry view may hold.
 VIEW_BYTES_CAP = 512 << 20
 #: Audio seconds (x channels) one measure unit may analyse.
@@ -1562,11 +1562,11 @@ def finalize(
 ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, dict[str, Any], list[str]]:
     """Fold waveform-stage evidence into one record: ``(record, tach, wind, measure, qa_flags)``.
 
-    Speed regime: authoritative source telemetry (``measured_regime``) fills an
-    unknown and, when ``strong``, overrides a protocol label (kept as
-    ``speed_regime_protocol``); the acoustic estimator's suggestion only fills a
-    still-unknown regime from resolved/partial rates. Wind: each assessed audio
-    role is combined by ``wind.combine`` with the direct source facet (direct
+    An explicitly constant source protocol stays constant: the facet describes
+    the operating condition, not the precision of its RPM. Native and acoustic
+    evidence retain any contrary observations separately. Strong telemetry
+    may revise other protocol labels; acoustics can fill unknowns. Wind: each
+    assessed audio role is combined by ``wind.combine`` with the direct source facet (direct
     evidence wins; unassessed roles stay unknown). Other disagreements are
     reported as QA flags, never applied.
     """
@@ -1591,6 +1591,8 @@ def finalize(
             if old == "unknown":
                 rec["speed_regime"] = sugg
                 evidence["speed_regime"] = note
+            elif old == "constant":
+                flags.append(f"speed_regime_protocol_vs_telemetry:constant!={sugg}")
             elif native.get("strong"):
                 rec["speed_regime_protocol"] = old
                 rec["speed_regime_protocol_evidence"] = evidence.get("speed_regime")
@@ -1623,7 +1625,9 @@ def finalize(
                 flags.append(f"speed_regime_vs_acoustic:{rec.get('speed_regime')}!={sugg}")
         if rec.get("speed_regime") == "constant" and not (native or {}).get("strong"):
             change = _strong_acoustic_change(tach)
-            if change:
+            if change and record.get("speed_regime") == "constant":
+                rec["speed_regime_acoustic_disagreement"] = {"kept": "constant", **change}
+            elif change:
                 rec["speed_regime_protocol"] = "constant"
                 rec["speed_regime_protocol_evidence"] = evidence.get("speed_regime")
                 rec["speed_regime"] = change["suggested"]
