@@ -152,6 +152,35 @@ def test_audio_rate_tracks_are_not_audio() -> None:
     assert not ref("audio", "<i8").is_audio
 
 
+def test_historical_chums_spectrum_keeps_array_but_not_audio_clock(tmp_path: Path) -> None:
+    stem = "ChuMS__UAV_rotor_recordings_TestResults__Test_0___Data_0___"
+    kinds = ("Freq", "SPL", "RawTruncatedCalibrated")
+    fields = frame_to_sample(_frame(audio_series(np.ones((1, 100), np.float32), 44100)))
+    digest, size = _pack(tmp_path, [(stem + kind, fields) for kind in kinds])
+    shard = ShardOpener([tmp_path]).open(digest, size)
+    scans = list(
+        scan_shard(
+            shard,
+            0,
+            dataset="SPCUP19-egonoise",
+            version="043e0a4e8264ebed3588c7706f6b23d25164e442d0e8129a7602f05b2852298b",
+            layout="tdframe-v1",
+        )
+    )
+    for scan in scans[:2]:
+        assert scan.info["audio_entries"] == []
+        assert not scan.info["has_audio"]
+        assert scan.info["duration_s"] is None and scan.info["sample_rate"] is None
+        ref = scan.series["audio"]
+        assert ref.shape == (100,) and ref.dims == ("frequency_bin",)
+        assert "rate_hz" not in scan.info["series"]["audio"]
+        assert shard.read(ref.offset, ref.length) == fields["audio"]
+        with pytest.raises(ValueError, match="not a uniformly sampled Series"):
+            read_view(shard, ref, 0, 0.1)
+    assert scans[2].info["audio_entries"] == ["audio"]
+    shard.close()
+
+
 def test_finite_runs() -> None:
     x = np.ones((2, 20), np.float32)
     x[1, 5] = np.nan

@@ -26,7 +26,7 @@ import struct
 import subprocess
 import time
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +47,9 @@ _NOT_AUDIO_TOKENS = (
     "count",
 )
 _MAX_AUDIO_CHANNELS = 512
+
+# The historical recipe serialized all ChuMS MATLAB fields as time-domain Series.
+_SPCUP19_EGONOISE_V1 = "043e0a4e8264ebed3588c7706f6b23d25164e442d0e8129a7602f05b2852298b"
 
 __all__ = [
     "AUDIO_MIN_RATE_HZ",
@@ -890,6 +893,26 @@ def scan_sample(
     else:
         scan = _scan_files(shard, shard_index, key, spans, fmap)
         kind = layout or "raw-files"
+    if dataset == "SPCUP19-egonoise" and version == _SPCUP19_EGONOISE_V1:
+        from data_processing.recording_annotations.legacy import is_non_waveform
+
+        if is_non_waveform(dataset, key):
+            # Keep the array's physical span and dtype. Its stored clock is an
+            # encoding artefact, not a sample rate or duration of measured audio.
+            ref = scan.series["audio"]
+            scan.series["audio"] = replace(
+                ref,
+                dims=tuple(
+                    "frequency_bin" if i == ref.time_axis else d for i, d in enumerate(ref.dims)
+                ),
+                time_axis=None,
+                index=None,
+                rate_hz=None,
+                t_start_s=None,
+                t_end_s=None,
+                n_time=None,
+                index_start_ticks=None,
+            )
     scan.info = _info(
         scan,
         dataset=dataset,

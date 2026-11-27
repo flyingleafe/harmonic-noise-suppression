@@ -249,11 +249,35 @@ def test_spcup_team_rules():
     )
     assert late["parent"]["offset_s"] == pytest.approx(-315058 / 44100)
     assert late["parent"]["duration_s"] == pytest.approx((315058 + 2551443) / 44100)
-    spl = _facts(
-        "SPCUP19-egonoise", "ChuMS__UAV_rotor_recordings_TestResults__Test_0___Data_0___SPL"
-    )
-    assert spl["parent"]["binding"] == "none" and not spl["tach_candidate"]
     assert _facts("SPCUP19-egonoise", "Idea_ssu__stationary_1")["provenance_kind"] == "alias"
+
+
+@pytest.mark.parametrize(
+    ("field", "representation"), [("Freq", "frequency_axis"), ("SPL", "level_spectrum")]
+)
+def test_spcup_old_spectral_products_are_not_audio(field, representation):
+    dataset = "SPCUP19-egonoise"
+    stem = "ChuMS__UAV_rotor_recordings_TestResults__Test_5___Data_6___"
+    key = stem + field
+    assert legacy.is_non_waveform(dataset, key)
+    assert not legacy.is_non_waveform(dataset, stem + "RawTruncatedCalibrated")
+    assert not legacy.is_non_waveform("SPCUP19-frames", key)
+    assert not legacy.is_non_waveform(dataset, key.replace("Data_6", "Data_8"))
+
+    facts = _facts(dataset, key, has_audio=False)
+    assert facts["representation"] == representation
+    assert facts["rig_mount"] == "free_flight" and facts["n_active"] == 4
+    assert facts["parent"] == {
+        "dataset": "SPCUP19-frames",
+        "key": "ChuMS__UAV_rotor_recordings__1prop_repeat2",
+        "binding": "none",
+        "role": "audio",
+        "channel": 6,
+    }
+    assert not facts["tach_candidate"] and "roles" not in facts
+    for facet in ("speed_regime", "wind", "sound_content"):
+        assert facts[facet] == "not_applicable"
+        assert "not a time-domain waveform" in facts["evidence"][facet]
 
 
 def test_bench_points_inherit_parents():

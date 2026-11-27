@@ -612,6 +612,71 @@ def _index_skeleton(series: td.Series) -> td.Series:
     return td.Series(np.zeros(np.shape(series.data), dtype=bool), series.dims, series.indexes)
 
 
+def _assert_same_series_data(actual: np.ndarray, expected: np.ndarray, path: str) -> None:
+    assert actual.dtype == expected.dtype and actual.shape == expected.shape, path
+    if expected.dtype.names:
+        # Record equality treats NaT/NaN leaves as unequal. Compare the exact
+        # native bytes instead, including null encodings and NaN payloads.
+        opaque = np.dtype(f"V{expected.dtype.itemsize}")
+        actual, expected = actual.view(opaque), expected.view(opaque)
+    np.testing.assert_array_equal(actual, expected, err_msg=path)
+
+
+def test_chums_spectral_products_are_not_audio(tmp_path, monkeypatch):
+    dataset = "SPCUP19-egonoise"
+    stem = "ChuMS__UAV_rotor_recordings_TestResults__Test_0___Data_0___"
+    products = {"Freq": [0.0, 30.0, 60.0], "SPL": [50.0, 25.0, np.nan]}
+    native = {}
+    for kind, values in {**products, "RawTruncatedCalibrated": [0.1, -0.2]}.items():
+        native[stem + kind] = streams.frame_to_sample(
+            td.Frame({"audio": td.uniform(np.array(values, np.float32), SR, dims=("time",))})
+        )
+    repo = _repo(tmp_path)
+    manifest = repo.commit(dataset, list(native.items()), meta={"layout": "tdframe-v1"})
+    # The misencoding is known only on the frozen parent version.
+    example = stem + "Freq"
+    assert "audio" in ra.decode_sample(
+        "tdframe-v1", example, native[example], dataset=dataset, parent_version=manifest.version
+    )
+    monkeypatch.setattr(ra_storage, "_CHUMS_SPECTRAL_PARENT_VERSION", manifest.version)
+    stage = tmp_path / "stage"
+    path = stage / f"{dataset}@{manifest.version}.sqlite"
+    with ra.IndexWriter(
+        path,
+        dataset=dataset,
+        version=manifest.version,
+        layout="tdframe-v1",
+        parent_shards=manifest.shards,
+    ) as w:
+        for loc, key, _ in ra.located_samples(dataset, manifest.version, repo=repo):
+            audio = key.endswith("___RawTruncatedCalibrated")
+            facts = _record() if audio else schema.normalize({}, has_audio=False)
+            w.add(key, facts, location=loc, info={"has_audio": audio})
+    release = ra.open_release(stage, repo=repo)
+    idx = release.index(dataset, manifest.version)
+    assert list(idx.keys({"has_audio": True})) == [stem + "RawTruncatedCalibrated"]
+    for kind in products:
+        key = stem + kind
+        frame = ra.load_frame(dataset, key, version=manifest.version, release=release)
+        assert "audio" not in frame and frame.duration == 0
+        spectral = frame["spectral_values"]
+        assert spectral.dims == ("frequency_bin",) and not spectral.has_time
+        original = streams.sample_to_frame(native[key])["audio"]
+        np.testing.assert_array_equal(spectral.data.view("u4"), original.data.view("u4"))
+        assert frame["meta"]["spectral_source"] == {
+            "product": kind,
+            "representation": "frequency_axis" if kind == "Freq" else "level_spectrum",
+            "stored_field": "audio",
+            "stored_layout": "tdframe-v1",
+            "stored_axis": "time",
+            "is_waveform": False,
+        }
+    waveform = ra.load_frame(
+        dataset, stem + "RawTruncatedCalibrated", version=manifest.version, release=release
+    )
+    assert "audio" in waveform and "spectral_values" not in waveform
+
+
 def assert_overlay_preserves(got: td.Frame, want: td.Frame, path: str = "") -> None:
     """``got`` = ``want`` plus only the annotation overlay: nested Frames
     recursively, Series by dims/indexes (any time-index kind) and NaN-aware
@@ -624,8 +689,9 @@ def assert_overlay_preserves(got: td.Frame, want: td.Frame, path: str = "") -> N
         sorted(extra),
         sorted(set(want) - set(got)),
     )
-    if any(isinstance(want[n], td.Series) and want[n].has_time for n in want):
-        assert (got.t_start_ticks, got.t_end_ticks) == (want.t_start_ticks, want.t_end_ticks), path
+    overlay = [got[name] for name in extra & _OVERLAY]
+    assert got.t_start_ticks == min([want.t_start_ticks, *(s.t_start_ticks for s in overlay)]), path
+    assert got.t_end_ticks == max([want.t_end_ticks, *(s.t_end_ticks for s in overlay)]), path
     for name in want:
         a, b = got[name], want[name]
         where = f"{path}{name}"
@@ -634,10 +700,53 @@ def assert_overlay_preserves(got: td.Frame, want: td.Frame, path: str = "") -> N
             assert_overlay_preserves(a, b, f"{where}/")
         elif isinstance(b, td.Series):
             assert isinstance(a, td.Series) and _index_skeleton(a).equal(_index_skeleton(b)), where
-            assert np.asarray(a.data).dtype == np.asarray(b.data).dtype, where
-            np.testing.assert_array_equal(np.asarray(a.data), np.asarray(b.data), err_msg=where)
+            _assert_same_series_data(np.asarray(a.data), np.asarray(b.data), where)
         else:
             assert type(a) is type(b) and (a == b or (a != a and b != b)), where  # NaN == NaN
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_tach_bounds_use_analysed_audio_grid(nested):
+    # Native GridIndex(sr, n) can declare zero duration despite having PCM.
+    # A different, longer role (or the parent hull) must not mask bad centres.
+    t0 = 4.0 if nested else 0.0
+    grid = td.GridIndex(SR, 2 * SR, t_start_ticks=td.secs_to_ticks(t0))
+    pcm = td.Series(np.zeros((17, 2 * SR), np.float32), ("mic", "time"), {"time": grid})
+    role = "remote/pcm" if nested else "audio"
+    if nested:
+        dat = np.array(
+            [(np.datetime64("NaT", "ns"), np.nan)], dtype=[("utc", "M8[ns]"), ("x", "f8")]
+        )
+        parent = td.Frame(
+            {
+                "audio": td.uniform(np.zeros(10 * SR), SR),
+                "remote": td.Frame({"pcm": pcm}),
+                "dat": td.Frame({"rows": td.Series(dat, ("row",))}),
+            }
+        )
+    else:
+        parent = td.Frame({"audio": pcm})
+        assert parent.t_start == parent.t_end == 0.0
+    parent = streams.decode_tdframe(("example", streams.frame_to_sample(parent)))
+    record = {"dataset": PARENT, "key": "example", "measure": {"tach": {"role": role}}}
+    tach = {
+        "role": "audio",  # declared preference; the measurement's role takes precedence
+        "n_windows": 1,
+        "n_accepted": 1,
+        "audio_t_start_s": t0,
+        "times": np.array([[0.0, 1.0, 0.5]], np.float32),
+        "accepted": np.array([True]),
+        "rates": np.array([[50.0]], np.float32),
+        "uncertainty": np.array([[0.1]], np.float32),
+    }
+    got = ra.annotate_frame(parent, record, tach, {})
+    acoustic = got["rps_acoustic"]
+    assert (acoustic.t_start, acoustic.t_end) == (t0, t0 + 2.0)
+    np.testing.assert_allclose(acoustic.tindex.abs_stamps, [t0 + 0.5])
+    assert_overlay_preserves(got, parent)
+    tach["times"] = np.array([[2.5, 3.5, 3.0]], np.float32)
+    with pytest.raises(ValueError, match=rf"example role '{role}'.*outside the audio domain"):
+        ra.annotate_frame(parent, record, tach, {})
 
 
 @pytest.mark.network
@@ -658,6 +767,7 @@ def test_live_release_roundtrip():
         rows = idx.select({"has_audio": True}, limit=20, order="duration_s")
         if rows:
             key = min(rows, key=lambda r: _location(idx, r["key"]).length)["key"]
+            print(f"round-trip {parent.dataset}/{key}", flush=True)
             frame = ra.load_frame(parent.dataset, key, version=parent.version, release=rel)
             loc = _location(idx, key)
             spec = ra.media_field(parent.dataset, key, loc)
@@ -689,6 +799,8 @@ def test_live_release_roundtrip():
                 np.isfinite(np.where(tach["accepted"][:, None], tach["rates"], np.nan)).any()
             )
             assert ("rps_acoustic" in frame) == claims
+        else:
+            print(f"index-only {parent.dataset}: no audio rows", flush=True)
         others = [m.version for m in repo.versions(parent.dataset)]
         unannotated = [
             v

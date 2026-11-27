@@ -133,8 +133,21 @@ _CHUMS_TESTS = (
     "3prop_repeat3",
 )
 _CHUMS_EGONOISE = re.compile(
-    r"^ChuMS__UAV_rotor_recordings_TestResults__Test_(\d+)___Data_(\d+)___(\w+)$"
+    r"ChuMS__UAV_rotor_recordings_TestResults__Test_([0-8])___Data_([0-7])___"
+    r"(Freq|SPL|RawTruncatedCalibrated)"
 )
+_CHUMS_SPECTRAL_PRODUCTS = {
+    "Freq": ("frequency_axis", "frequency-bin coordinates"),
+    "SPL": ("level_spectrum", "sound-pressure levels by frequency bin"),
+}
+
+
+def is_non_waveform(dataset: str, key: str) -> bool:
+    """Recognize ChuMS MATLAB spectral products stored under the old ``audio`` field."""
+    if dataset != "SPCUP19-egonoise":
+        return False
+    match = _CHUMS_EGONOISE.fullmatch(key)
+    return match is not None and match[3] in _CHUMS_SPECTRAL_PRODUCTS
 
 
 # ─── record helpers ───────────────────────────────────────────────────────────
@@ -1346,17 +1359,31 @@ def _spcup(key: str, info: dict | None = None) -> dict:
 
 
 def _spcup_egonoise(key: str, info: dict) -> dict:
-    if m := _CHUMS_EGONOISE.match(key):
+    if m := _CHUMS_EGONOISE.fullmatch(key):
         test, mic, what = int(m.group(1)), int(m.group(2)), m.group(3)
         rid = f"ChuMS__UAV_rotor_recordings__{_CHUMS_TESTS[test]}"
-        if what != "RawTruncatedCalibrated":
+        if product := _CHUMS_SPECTRAL_PRODUCTS.get(what):
+            representation, description = product
+            note = (
+                f"ChuMS Test {test + 1}, mic {mic + 1}, MATLAB {what}: {description}, "
+                "stored under the old audio field but not a time-domain waveform"
+            )
             out = _view(
                 _spcup(rid),
                 "derivative",
                 _parent("SPCUP19-frames", rid, "none", channel=mic),
-                f"ChuMS Test {test + 1} mic {mic + 1} {what} array (spectrum, not a waveform)",
+                note,
             )
-            out["tach_candidate"] = False
+            _set(
+                out,
+                _SPCUP.format(team="ChuMS"),
+                speed_regime=("not_applicable", note),
+                sound_content=("not_applicable", note),
+                wind=("not_applicable", note),
+            )
+            out.pop("roles", None)
+            out.pop("role_motion", None)
+            out.update(representation=representation, tach_candidate=False)
             return out
         # The egonoise arrays are the untouched TestResults.Test(t).Data(m).RawTruncatedCalibrated
         # (lengths = the Frame's meta.mic_n_samples). SPCUP19-frames drops the first |K| samples of

@@ -76,6 +76,8 @@ RAW_LAYOUTS = (None, "raw-files", "raw-files-v1")
 #: keys in AuDroK@ea0e533e6ce4); every other XML there is a document.
 AUDROK_RAW = "AuDroK"
 _AUDROK_CONTAINER = re.compile(r"^Measurements_\d+-\d+/\d{2}-[A-Z0-9]{2}-Mi[1-6]$")
+#: Only this frozen legacy SPCUP19 parent persisted ChuMS Freq/SPL as PCM.
+_CHUMS_SPECTRAL_PARENT_VERSION = "043e0a4e8264ebed3588c7706f6b23d25164e442d0e8129a7602f05b2852298b"
 #: What ``rps_acoustic_uncertainty`` holds unless the estimator says otherwise.
 UNCERTAINTY_KIND = "estimator_reported_scale"
 _FOOTER = struct.Struct("<Q")
@@ -268,13 +270,15 @@ def decode_sample(
     fields: Mapping[str, bytes],
     *,
     dataset: str | None = None,
+    parent_version: str | None = None,
     parent_meta: Mapping[str, Any] | None = None,
     sample_rate: float | None = None,
     has_audio: bool | None = None,
 ) -> td.Frame:
     """Decode one parent sample with its layout's established convention.
 
-    - ``tdframe-v1``: :func:`streams.decode_tdframe` (entries untouched);
+    - ``tdframe-v1``: :func:`streams.decode_tdframe`; legacy ChuMS Freq/SPL
+      products become invariant spectral arrays rather than waveform series;
     - raw trees (layout absent, ``raw-files``, ``raw-files-v1``): the audio
       field (by extension, by the key's suffix for extensionless files, else
       sniffed when the index says ``has_audio``) -> ``audio`` ``(time,)``/
@@ -289,7 +293,32 @@ def decode_sample(
     """
     parent_meta = parent_meta or {}
     if layout == streams.TDFRAME_LAYOUT:
-        return streams.decode_tdframe((key, dict(fields)))
+        frame = streams.decode_tdframe((key, dict(fields)))
+        if dataset == "SPCUP19-egonoise" and parent_version == _CHUMS_SPECTRAL_PARENT_VERSION:
+            from data_processing.recording_annotations.legacy import is_non_waveform
+
+            if is_non_waveform(dataset, key):
+                product = key.rsplit("___", 1)[1]
+                audio = frame["audio"]
+                dims = tuple("frequency_bin" if dim == "time" else dim for dim in audio.dims)
+                indexes = {dim: idx for dim, idx in audio.indexes.items() if dim != "time"}
+                entries = {entry: frame[entry] for entry in frame if entry != "audio"}
+                entries["spectral_values"] = td.Series(audio.data, dims, indexes)
+                # Recompute the hull without the discarded, fictitious PCM grid.
+                return with_meta(
+                    td.Frame(entries),
+                    spectral_source={
+                        "product": product,
+                        "representation": (
+                            "frequency_axis" if product == "Freq" else "level_spectrum"
+                        ),
+                        "stored_field": "audio",
+                        "stored_layout": streams.TDFRAME_LAYOUT,
+                        "stored_axis": "time",
+                        "is_waveform": False,
+                    },
+                )
+        return frame
     if layout in RAW_LAYOUTS:
         meta: dict[str, Any] = {"recording_id": key, "source_fields": sorted(fields)}
         entries: dict[str, Any] = {}
@@ -551,14 +580,39 @@ def decode_media_frame(source: MediaInput, key: str, fields: Sequence[str]) -> t
 # ─── The annotated view ────────────────────────────────────────────────────────
 
 
-def _has_time(frame: td.Frame) -> bool:
-    for name in frame:
-        entry = frame[name]
-        if isinstance(entry, td.Series) and entry.has_time:
-            return True
-        if isinstance(entry, td.Frame) and _has_time(entry):
-            return True
-    return False
+def _analysed_audio(
+    frame: td.Frame, record: Mapping[str, Any], tach: Mapping[str, Any]
+) -> tuple[str, td.Series]:
+    measured = (record.get("measure") or {}).get("tach") or {}
+    role = str(measured.get("role") or tach.get("role") or "audio")
+    entry: Any = frame
+    for part in role.split("/"):
+        entry = entry[part] if isinstance(entry, td.Frame) and part in entry else None
+    if (
+        entry is None
+        and (record.get("info") or {}).get("layout") in RAW_LAYOUTS
+        and "audio" in frame
+        and "meta" in frame
+    ):
+        # Raw container decoders expose a single PCM Series as `audio`, while
+        # the scanner names its role by the original field (wav, mp4, xml, …).
+        meta = frame["meta"]
+        if "source_fields" in meta and role in meta["source_fields"]:
+            entry = frame["audio"]
+    if not isinstance(entry, td.Series) or not entry.has_time:
+        raise ValueError(f"{record['dataset']}/{record['key']}: no decoded audio role {role!r}")
+    return role, entry
+
+
+def _audio_bounds(audio: td.Series) -> tuple[float, float]:
+    idx = audio.tindex
+    if isinstance(idx, td.GridIndex):
+        # Some native sources construct GridIndex(sr, size) directly. It has
+        # all the sample positions but a zero declared duration. Match the
+        # scanner's sample extent (n / rate), without rewriting the source.
+        grid = td.GridIndex.create((idx.sr_num, idx.sr_den), idx.size, t_start=idx.t_start_ticks)
+        return grid.t_start, grid.t_end
+    return audio.t_start, audio.t_end
 
 
 def acoustic_series(
@@ -582,7 +636,7 @@ def acoustic_series(
     centers = times[:, 2]
     if centers[0] < t_start - 1e-6 or centers[-1] >= t_end + 1e-6:
         raise ValueError(
-            f"tachometry centres [{centers[0]:.3f}, {centers[-1]:.3f}] s fall outside the Frame "
+            f"tachometry centres [{centers[0]:.3f}, {centers[-1]:.3f}] s fall outside the audio "
             f"domain [{t_start:.3f}, {t_end:.3f}) s — clock mismatch"
         )
     centers = np.clip(centers, t_start, np.nextafter(t_end, -np.inf))
@@ -628,19 +682,25 @@ def annotate_frame(
             "uncertainty_kind": summary.get("uncertainty_kind", UNCERTAINTY_KIND),
         }
     conditions["annotation_release"] = dict(release)
+    source = frame
     if frame is None:
         frame = td.Frame({"meta": td.Frame({"recording_id": record["key"]})})
     frame = with_meta(frame, recording_conditions=_plain(conditions))
-    if tach is None or not tach["n_windows"]:
+    if tach is None or not tach["n_windows"] or not tach["n_accepted"]:
         return frame
-    if _has_time(frame):
-        t0, t1 = float(frame.t_start), float(frame.t_end)
+    if source is not None:
+        role, analysed = _analysed_audio(source, record, tach)
+        t0, t1 = _audio_bounds(analysed)
     else:
+        role = str(tach.get("role") or "audio")
         t0 = float(tach.get("audio_t_start_s") or 0.0)
         duration = (record.get("info") or {}).get("duration_s")
         last = t0 + float(tach["times"][-1, 2])
         t1 = max(t0 + float(duration), last + 1e-6) if duration else last + 1e-6
-    series = acoustic_series(tach, t0, t1)
+    try:
+        series = acoustic_series(tach, t0, t1)
+    except ValueError as exc:
+        raise ValueError(f"{record['dataset']}/{record['key']} role {role!r}: {exc}") from exc
     for name, s in (series or {}).items():
         if name in frame:
             raise ValueError(f"parent Frame already has an entry named {name!r}")
@@ -847,6 +907,7 @@ class Release:
                         key,
                         fields,
                         dataset=idx.dataset,
+                        parent_version=idx.version,
                         parent_meta=parent_meta,
                         sample_rate=info.get("sample_rate"),
                         has_audio=info.get("has_audio"),
