@@ -27,6 +27,8 @@ from typing import Any, cast
 
 import numpy as np
 
+from tracking.dsp import running_median_db as _floor
+
 
 @dataclass(frozen=True)
 class Params:
@@ -117,19 +119,6 @@ class Spectrum:
     def prom_mean(self) -> np.ndarray:
         """(F,) channel-mean prominence in dB."""
         return self.prom.mean(axis=0)
-
-
-def _floor(p_db: np.ndarray, half: int) -> np.ndarray:
-    """Running median of each row over ``2·half+1`` bins (strided, interpolated)."""
-    from scipy.ndimage import median_filter
-
-    stride = max(1, half // 16)
-    sub = p_db[:, ::stride]
-    width = max(3, 2 * (half // stride) + 1)
-    med = median_filter(sub, size=(1, width), mode="nearest")
-    x_full = np.arange(p_db.shape[1])
-    x_sub = x_full[::stride]
-    return np.stack([np.interp(x_full, x_sub, row) for row in med])
 
 
 def spectrum(x_ct: np.ndarray, fs: int, p: Params) -> Spectrum:

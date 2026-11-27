@@ -54,7 +54,7 @@ import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -602,3 +602,89 @@ def boxcar(x: np.ndarray, w: int) -> np.ndarray:
     if a.ndim == 1:
         return np.convolve(ap, kern, mode="valid")
     return np.apply_along_axis(lambda v: np.convolve(v, kern, mode="valid"), -1, ap)
+
+
+@lru_cache(maxsize=8)
+def _hann(n: int) -> np.ndarray:
+    return np.hanning(n).astype(np.float32)
+
+
+def hann_line_power(x: np.ndarray, fs: float, f_max: float) -> tuple[np.ndarray, float]:
+    """Padded Hann periodogram, incoherently pooled across microphones.
+
+    Padding samples the main lobe; it does not increase the resolution. Process
+    channels individually to bound working memory even on large arrays. Normalize
+    by each microphone's in-band background so one high-gain/noisy channel
+    cannot drown out all the others.
+    """
+    from scipy.fft import next_fast_len, rfft
+
+    n = x.shape[-1]
+    n_fft = cast(int, next_fast_len(4 * n, real=True))
+    step = fs / n_fft
+    stop = int(f_max / step) + 1
+    power = np.zeros(stop, dtype=np.float32)
+    taper = _hann(n)
+    for row in x:
+        spec = np.asarray(rfft(row * taper, n=n_fft, workers=1))[:stop]
+        p = np.square(np.abs(spec))
+        scale = max(float(np.median(p[1::8])), float(np.max(p)) * 1e-10, 1e-30)
+        power += p / scale
+    return power, step
+
+
+def line_cell_spectrum(
+    x: np.ndarray, fs: float, f_max: float
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Independent Blackman spectrum for the static-rig line-evidence check.
+
+    Return incoherent normalized power and median-whitened power, on a grid
+    with four samples per native bin. Whiten before pooling microphones.
+    """
+    from scipy.fft import next_fast_len, rfft
+
+    n = x.shape[-1]
+    n_fft = cast(int, next_fast_len(4 * n, real=True))
+    df = fs / n_fft
+    limit = min(round(f_max / df) + 1, n_fft // 2 + 1)
+    power = np.zeros(limit, dtype=np.float32)
+    whitened = np.zeros(limit, dtype=np.float32)
+    taper = np.blackman(n).astype(np.float32)
+    for row in x:
+        z = np.square(np.abs(np.asarray(rfft(row * taper, n=n_fft, workers=1))[:limit]))
+        scale = max(float(np.median(z[1::8])), float(np.max(z)) * 1e-10, 1e-30)
+        z /= scale
+        floor_db = running_median_db(
+            (10 * np.log10(np.maximum(z, 1e-24)))[None], max(2, round(8 / df))
+        )[0]
+        whitened += z / np.power(10, 0.1 * floor_db)
+        power += z
+    return power, whitened / x.shape[0], df
+
+
+def running_median_db(p_db: np.ndarray, half: int) -> np.ndarray:
+    """Static-rig floor: per-row median over 2·half+1 bins, strided/interpolated."""
+    from scipy.ndimage import median_filter
+
+    stride = max(1, half // 16)
+    sub = p_db[:, ::stride]
+    width = max(3, 2 * (half // stride) + 1)
+    med = median_filter(sub, size=(1, width), mode="nearest")
+    x_full = np.arange(p_db.shape[1])
+    x_sub = x_full[::stride]
+    return np.stack([np.interp(x_full, x_sub, row) for row in med])
+
+
+def log_peak_offset(y0: np.ndarray, y1: np.ndarray, y2: np.ndarray) -> np.ndarray:
+    """Quadratic sub-bin offset from a peak and its neighbors on log power."""
+    curvature = y0 - 2.0 * y1 + y2
+    return np.clip(
+        np.divide(
+            0.5 * (y0 - y2),
+            curvature,
+            out=np.zeros_like(curvature),
+            where=np.abs(curvature) > 1e-12,
+        ),
+        -0.5,
+        0.5,
+    )

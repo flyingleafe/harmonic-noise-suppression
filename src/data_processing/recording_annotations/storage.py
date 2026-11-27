@@ -9,18 +9,22 @@ shard (or the whole shard through the dload cache when most of it is wanted).
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import io
 import json
 import os
 import re
+import shutil
 import struct
+import subprocess
 import tempfile
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path, PurePosixPath
@@ -46,6 +50,12 @@ from data_processing.recording_annotations.index import (
     SampleLocation,
     _plain,
     location_from_entry,
+)
+from data_processing.recording_annotations.media import (
+    ADTS_HEADER_BYTES,
+    aac_runs,
+    append_adts,
+    parse_mp4_audio,
 )
 
 RELEASE_NAME = "drone-recording-annotations"
@@ -294,6 +304,11 @@ def decode_sample(
                 t_start=0.0,
             )
             meta.update(container_header=dict(header), container_wav=_plain(wav))
+        elif has_audio and (dataset, key) in MEDIA_AUDIO:
+            raise ValueError(
+                f"{dataset}/{key} is a media container: decode its audio in place with "
+                "media_input(...) + decode_media_frame(...) (Release.frames does), not from bytes"
+            )
         else:
             field = _raw_audio_field(key, fields, has_audio)
             if field is not None:
@@ -334,6 +349,203 @@ def decode_sample(
             }
         )
     raise ValueError(f"unsupported parent layout {layout!r}")
+
+
+# ─── Audio tracks inside raw media containers ─────────────────────────────────
+
+#: Raw media files whose audio track is genuine source audio, by exact
+#: ``(dataset, key) -> (field, bytes)``: the seven AVQ-raw GoPro MP4s (AAC 48 kHz;
+#: S1 stereo, S2 mono; measured on uni-cpu, see ``legacy._AVQ_GOPRO_AUDIO``).
+#: Any other video stays opaque.
+MEDIA_AUDIO: dict[tuple[str, str], tuple[str, int]] = {
+    ("AVQ-raw", "S1__seq4__Video"): ("mp4", 331_984_292),
+    ("AVQ-raw", "S2__seq3__video"): ("mp4", 28_055_089),
+    ("AVQ-raw", "S2__seq4__video"): ("mp4", 27_783_331),
+    ("AVQ-raw", "S2__seq5__video"): ("mp4", 42_778_765),
+    ("AVQ-raw", "S2__seq6__video"): ("mp4", 44_836_957),
+    ("AVQ-raw", "S2__seq7__video"): ("mp4", 40_556_438),
+    ("AVQ-raw", "S2__seq8__video"): ("mp4", 42_953_072),
+}
+_MAX_AAC_BYTES = 32 << 20
+_MAX_PCM_BYTES = 384 << 20
+_AAC_READ_WORKERS = 8
+
+
+def _media_tool(name: str) -> str:
+    exe = shutil.which(name)
+    if exe is None:
+        raise FileNotFoundError(f"{name} not on PATH (uni: `module load ffmpeg`)")
+    return exe
+
+
+def _run_media(stage: str, args: list[str], payload: bytearray | None = None) -> bytes:
+    """FFmpeg only sees an AAC pipe, never a URL or object-store credentials."""
+    proc = subprocess.run(
+        args, input=payload, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"media {stage} failed: {Path(args[0]).name} exited {proc.returncode}"
+        ) from None
+    return proc.stdout
+
+
+def media_field(dataset: str, key: str, loc: SampleLocation | None) -> tuple[str, int, int] | None:
+    """``(field, offset in shard, length)`` of a listed media audio container, else None."""
+    spec = MEDIA_AUDIO.get((str(dataset), str(key)))
+    if spec is None or loc is None:
+        return None
+    for name, rel, length in loc.fields:
+        if name == spec[0] and length == spec[1]:
+            return name, loc.offset + rel, length
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class MediaInput:
+    """The length and a half-open, field-relative range reader of an MP4."""
+
+    length: int
+    read: Callable[[int, int], bytes]
+
+
+@contextlib.contextmanager
+def media_input(
+    repo: dload.Repository, shard: ShardInfo, offset: int, length: int
+) -> Iterator[MediaInput]:
+    """Read an MP4 field in place; neither its video nor a cold shard is cached."""
+    if offset < 0 or length <= 0 or offset + length > shard.size:
+        raise ValueError("media field falls outside its parent shard")
+
+    def check(start: int, end: int) -> None:
+        if not 0 <= start < end <= length:
+            raise ValueError("media range falls outside the MP4 field")
+
+    @contextlib.contextmanager
+    def local(path: Path) -> Iterator[MediaInput]:
+        with path.open("rb") as file:
+
+            def read(start: int, end: int) -> bytes:
+                check(start, end)
+                data = os.pread(file.fileno(), end - start, offset + start)
+                if len(data) != end - start:
+                    raise OSError("short read of local MP4 field")
+                return data
+
+            yield MediaInput(length, read)
+
+    pinned = repo.cache.pin_existing(shard.digest)
+    if pinned is not None:
+        with pinned as path, local(path) as source:
+            yield source
+        return
+
+    remote = repo.remote
+    key = _shard_key(shard.digest)
+    if isinstance(remote, LocalRemote):
+        with local(remote.root / key) as source:
+            yield source
+    elif isinstance(remote, S3Remote):
+        client = remote._s3
+        object_key = remote._full_key(key)
+
+        def read(start: int, end: int) -> bytes:
+            check(start, end)
+            begin, last = offset + start, offset + end - 1
+
+            def get() -> bytes:
+                response = client.get_object(
+                    Bucket=remote.bucket, Key=object_key, Range=f"bytes={begin}-{last}"
+                )
+                with contextlib.closing(response["Body"]) as body:
+                    if response.get("ContentRange") != f"bytes {begin}-{last}/{shard.size}":
+                        raise OSError("R2 returned an unexpected Content-Range for MP4 audio")
+                    data = body.read()
+                    if len(data) != end - start:
+                        raise OSError("short R2 read of MP4 audio")
+                    return data
+
+            return _retrying(get)
+
+        yield MediaInput(length, read)
+    else:
+        raise TypeError(f"no ranged media input for remote {type(remote).__name__}")
+
+
+def decode_media_audio(source: MediaInput) -> tuple[np.ndarray, int, dict[str, Any]]:
+    """Decode only the first AAC track, continuously, on the MP4 presentation clock.
+
+    Read the MP4 tables and contiguous AAC chunks by range and wrap the access
+    units in ADTS for local ffmpeg. Trim priming and the final AAC padding
+    according to the tables. The all-frame decode preserves inter-frame state.
+    """
+    track = parse_mp4_audio(source.read, source.length)
+    n_frames = len(track.sizes)
+    if int(track.sizes.sum()) + ADTS_HEADER_BYTES * n_frames > _MAX_AAC_BYTES:
+        raise ValueError("MP4 AAC track exceeds the compressed audio read limit")
+    if 4 * track.channels * n_frames * 1024 > _MAX_PCM_BYTES:
+        raise ValueError("MP4 AAC track exceeds the decoded audio limit")
+    ffmpeg = _media_tool("ffmpeg")
+
+    def fetch(run: tuple[int, int]) -> bytes:
+        a, b = run
+        return source.read(int(track.offsets[a]), int(track.offsets[b - 1] + track.sizes[b - 1]))
+
+    adts = bytearray()
+    runs = iter(aac_runs(track, 0, n_frames))
+    with ThreadPoolExecutor(max_workers=_AAC_READ_WORKERS) as pool:
+        # Keep only one batch of completed ranges resident, in track order.
+        while batch := list(islice(runs, _AAC_READ_WORKERS)):
+            for (a, b), data in zip(batch, pool.map(fetch, batch), strict=True):
+                append_adts(adts, track, a, b, data)
+    raw = _run_media(
+        "audio stream a:0 decode",
+        [
+            ffmpeg,
+            "-nostdin",
+            "-v",
+            "error",
+            "-xerror",
+            "-f",
+            "aac",
+            "-i",
+            "pipe:0",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "pipe:1",
+        ],
+        adts,
+    )
+    if not raw or len(raw) % (4 * track.channels):
+        raise ValueError("empty or truncated AAC decoder output")
+    pcm = np.frombuffer(raw, dtype="<f4").reshape(-1, track.channels)
+    end = int(track.starts[-1])
+    if not end <= len(pcm) < end + 1024:
+        raise ValueError(f"AAC decoder returned {len(pcm)} samples; MP4 tables specify {end}")
+    audio = pcm[track.skip : end].T
+    info = {
+        "codec": "aac",
+        "channels": track.channels,
+        "sample_rate": track.sr,
+        "t_start_s": track.delay_s,
+        "audio_duration_s": audio.shape[1] / track.sr,
+        "decoded_samples": audio.shape[1],
+        "decoder": _run_media("decoder version", [ffmpeg, "-version"]).decode().splitlines()[0],
+    }
+    return audio, track.sr, info
+
+
+def decode_media_frame(source: MediaInput, key: str, fields: Sequence[str]) -> td.Frame:
+    """The canonical Frame of a listed media container: its audio track on the
+    container clock (``audio`` ``(time,)``/``(mic, time)``) plus ``meta.media``."""
+    audio, sr, info = decode_media_audio(source)
+    series = audio_series(audio, sr)
+    if info["t_start_s"]:
+        series = series.shift(float(info["t_start_s"]))
+    meta = {"recording_id": key, "source_fields": sorted(fields), "media": _plain(info)}
+    return td.Frame({"audio": series, "meta": td.Frame(meta)})
 
 
 # ─── The annotated view ────────────────────────────────────────────────────────
@@ -613,20 +825,32 @@ class Release:
             by_shard.setdefault(loc.shard, []).append((key, loc, info))
         for shard_i in sorted(by_shard):
             group = sorted(by_shard[shard_i], key=lambda item: item[1].offset)
-            digest, size, n = shards[shard_i]
-            spans = [(loc.offset, loc.length) for _, loc, _ in group]
-            payloads = read_spans(self._repo, ShardInfo(digest, size, n), spans)
-            for (key, loc, info), data in zip(group, payloads, strict=True):
-                fields = {name: data[off : off + length] for name, off, length in loc.fields}
-                frame = decode_sample(
-                    idx.layout,
-                    key,
-                    fields,
-                    dataset=idx.dataset,
-                    parent_meta=parent_meta,
-                    sample_rate=info.get("sample_rate"),
-                    has_audio=info.get("has_audio"),
-                )
+            shard = ShardInfo(*shards[shard_i])
+            # Listed media containers are decoded in place by ffmpeg (ranged), never
+            # read into memory; everything else is one ranged read per sample.
+            media = {
+                key: media_field(idx.dataset, key, loc) if info.get("has_audio") else None
+                for key, loc, info in group
+            }
+            plain = [(loc.offset, loc.length) for key, loc, _ in group if media[key] is None]
+            payloads = read_spans(self._repo, shard, plain) if plain else iter(())
+            for key, loc, info in group:
+                spec = media[key]
+                if spec is not None:
+                    with media_input(self._repo, shard, spec[1], spec[2]) as source:
+                        frame = decode_media_frame(source, key, [name for name, _, _ in loc.fields])
+                else:
+                    data = next(payloads)
+                    fields = {name: data[off : off + length] for name, off, length in loc.fields}
+                    frame = decode_sample(
+                        idx.layout,
+                        key,
+                        fields,
+                        dataset=idx.dataset,
+                        parent_meta=parent_meta,
+                        sample_rate=info.get("sample_rate"),
+                        has_audio=info.get("has_audio"),
+                    )
                 record = idx.record(key, windows=False)
                 assert record is not None
                 yield key, annotate_frame(frame, record, idx.tach_arrays(key), release)

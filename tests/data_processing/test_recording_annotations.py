@@ -8,6 +8,8 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import shutil
+import subprocess
 
 import numpy as np
 import pytest
@@ -658,21 +660,27 @@ def test_live_release_roundtrip():
             key = min(rows, key=lambda r: _location(idx, r["key"]).length)["key"]
             frame = ra.load_frame(parent.dataset, key, version=parent.version, release=rel)
             loc = _location(idx, key)
-            with repo.open_shard(
-                manifest.shards[loc.shard]
-            ) as path:  # independent whole-shard read
-                from dload.pack import PackReader
+            spec = ra.media_field(parent.dataset, key, loc)
+            shard = manifest.shards[loc.shard]
+            if spec is not None:
+                # Media must stay uncached even during the live verification.
+                assert frame["meta"]["media"]["codec"] == "aac"
+                assert frame["audio"].tindex.sr == 48_000
+                assert frame["audio"].t_start == frame["meta"]["media"]["t_start_s"]
+            else:
+                with repo.open_shard(shard) as path:  # independent whole-shard read
+                    from dload.pack import PackReader
 
-                with PackReader(path) as reader:
-                    raw = ra.decode_sample(
-                        idx.layout,
-                        key,
-                        reader.read_key(key)[1],
-                        dataset=parent.dataset,
-                        parent_meta=idx.meta()["parent_meta"],
-                        has_audio=True,
-                    )
-            assert_overlay_preserves(frame, raw)
+                    with PackReader(path) as reader:
+                        raw = ra.decode_sample(
+                            idx.layout,
+                            key,
+                            reader.read_key(key)[1],
+                            dataset=parent.dataset,
+                            parent_meta=idx.meta()["parent_meta"],
+                            has_audio=True,
+                        )
+                assert_overlay_preserves(frame, raw)
             cond = frame["meta"]["recording_conditions"]
             record = _record_of(idx, key, windows=False)
             assert all(cond[f] == record[f] for f in ra.FACET_NAMES)
@@ -690,3 +698,76 @@ def test_live_release_roundtrip():
         if unannotated:
             with pytest.raises(ra.NotAnnotatedError):
                 rel.index(parent.dataset, unannotated[0])
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH")
+def test_media_container_audio_ranged(tmp_path, monkeypatch):
+    """A listed MP4's AAC track is decoded by packet ranges on its own clock."""
+    mp4 = tmp_path / "clip.mp4"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=32x32:rate=5:duration=1",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1", "-ac", "2",
+         "-c:v", "mpeg4", "-c:a", "aac", "-shortest", str(mp4)],
+        check=True,
+    )  # fmt: skip
+    data = mp4.read_bytes()
+    repo = _repo(tmp_path)
+    raw = repo.commit(
+        "MEDIA-RAW-TEST",
+        [("cam/notes", {"txt": b"hi"}), ("cam/a__Video", {"mp4": data})],
+        meta={"layout": "raw-files"},
+    )
+    monkeypatch.setitem(
+        ra_storage.MEDIA_AUDIO, ("MEDIA-RAW-TEST", "cam/a__Video"), ("mp4", len(data))
+    )
+    stage = tmp_path / "stage"
+    with ra.IndexWriter(stage / f"MEDIA-RAW-TEST@{raw.version}.sqlite", dataset="MEDIA-RAW-TEST",
+                        version=raw.version, layout="raw-files", parent_shards=raw.shards) as w:  # fmt: skip
+        for loc, key, _ in ra.located_samples("MEDIA-RAW-TEST", raw.version, repo=repo):
+            w.add(key, _record(), info={"has_audio": key == "cam/a__Video"}, location=loc)
+        w.close()
+    cold = _repo(tmp_path, cache="cold-media-cache")
+    rel = ra.open_release(stage, repo=cold)
+    frame = ra.load_frame("MEDIA-RAW-TEST", "cam/a__Video", version=raw.version, release=rel)
+    assert isinstance(cold.remote, LocalRemote)
+    assert cold.remote.op_counts.get("get_to_file", 0) == 0  # no shard copy
+    assert not any((tmp_path / "cold-media-cache" / "shards").rglob("*"))
+    audio = frame["audio"]
+    assert audio.dim_size("time") == 48_000  # discard encoder priming and final padding
+    assert audio.dims == ("mic", "time") and audio.tindex.sr == 48000
+    media = frame["meta"]["media"]
+    assert (
+        media["codec"] == "aac" and media["channels"] == 2 and audio.t_start == media["t_start_s"]
+    )
+    # The encoder-priming packet (pts -21.3 ms) decodes to nothing; the first sample is pts 0.
+    assert media["t_start_s"] == 0.0
+    t = np.arange(audio.data.shape[1]) / 48000.0 + audio.t_start
+    ref = np.sin(2 * np.pi * 440 * t)
+    mid = slice(4800, 43200)
+    assert np.corrcoef(audio.data[0, mid], ref[mid])[0, 1] > 0.99  # the source tone, on its clock
+    meta_only = ra.load_frame(
+        "MEDIA-RAW-TEST", "cam/a__Video", version=raw.version, release=rel, audio=False
+    )
+    assert "audio" not in meta_only
+    with pytest.raises(ValueError, match="media container"):
+        ra.decode_sample(
+            "raw-files", "cam/a__Video", {"mp4": data}, dataset="MEDIA-RAW-TEST", has_audio=True
+        )
+
+
+def test_invalid_mp4_does_not_disclose_input(tmp_path, capfd):
+    invalid = tmp_path / "invalid.mp4?X-Amz-Signature=private-test-token"
+    invalid.write_bytes(b"not an MP4")
+    with invalid.open("rb") as file:
+
+        def read(start: int, end: int) -> bytes:
+            file.seek(start)
+            return file.read(end - start)
+
+        source = ra_storage.MediaInput(invalid.stat().st_size, read)
+        with pytest.raises(ValueError, match="malformed MP4 box") as exc:
+            ra.decode_media_audio(source)
+    output = capfd.readouterr()
+    diagnostic = str(exc.getrepr(style="short")) + output.out + output.err
+    assert "X-Amz-Signature" not in diagnostic
+    assert "private-test-token" not in diagnostic
