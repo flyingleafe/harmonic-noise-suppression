@@ -1174,14 +1174,18 @@ each setup's three fine-tunes once its pretraining succeeds.
 
 | setup | pretraining | mixed | fine-tune seeds 0 / 1 / 2 |
 |---|---|---|---|
-| hard | `mg-hard-pre-f6830e` (retried) | `mg-hard-mix-89f9e2` | waiting on pretraining |
+| hard | `mg-hard-resume-c044b7` (continues `mg-hard-pre-f6830e`) | `mg-hard-mix-89f9e2` | waiting on resumed pretraining |
 | easy | `mg-easy-pre-9e5a42` | `mg-easy-mix-f23842` | `mg-easy-ft-s0-673158` / `mg-easy-ft-s1-2bce4e` / `mg-easy-ft-s2-930e9f` |
 
-**Status (2026-11-27).** Hard pretraining failed before training on a GitHub
-fetch; requeued unchanged under the same job ID and restarted the fine-tune
-watcher. Easy pretraining, both mixed arms, and all three easy fine-tunes
-completed. The easy fine-tunes reached 20 000 steps from the same
-`best_near_macro_median` checkpoint (step 21 000, real macro 9.50 rev/s).
+**Status (2026-11-27).** The first hard pretraining attempt failed on a GitHub
+fetch. Its retry published round 8 at 4 500 steps (`uniform` 6.36 rev/s),
+but a subsequent restart failed because the run directory already existed.
+`mg-hard-resume-c044b7` explicitly uses `resume=true` in the original Isambard
+results directory to retain its weights, optimizer, history and checkpoint
+index. The hard fine-tune watcher now waits for that job. Easy pretraining,
+both mixed arms, and all three easy fine-tunes completed. The easy
+fine-tunes reached 20 000 steps from the same `best_near_macro_median`
+checkpoint (step 21 000, real macro 9.50 rev/s).
 
 | run | final step | real macro at lowest five-round median (rev/s) | selected step |
 |---|---:|---:|---:|
