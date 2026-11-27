@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Everything between raw recordings and a training loop's `td.Frame`s. Every
-dataset is declared once and materialized only through `scripts/derive.py`.
+Raw recordings to training `td.Frame`s. Dataset recipes: `scripts/derive.py`.
+Non-waveform analysis artifacts have separate producers in `ARTEFACT_PINS`.
 VK/refinement: `src/tracking`.
 
 ## Map
@@ -25,11 +25,8 @@ VK/refinement: `src/tracking`.
   — one builder each; `downloaders.py` — idempotent fetchers.
 
 **Layer 2 — derived datasets**, torch-free.
-- `derivations.py` — `SPECS`: every derived dataset as a frozen dload
-  pipeline spec + generator (`dregon_lm`, `dregon_lm_subset`, `dn_lm`,
-  `real_valid_panel`, `source_frames`, `frame_subset`, `raw_subset`,
-  `pcm16_mono`, `beatvk_valid`, `avq_vkrps`, `se_valid`, `decomp_frames`);
-  `PARENTS` (pinned, drift-guarded), `HISTORICAL_PINS`, `fingerprint`.
+- `derivations.py` — frozen dataset `SPECS`, pinned `PARENTS`, `HISTORICAL_PINS`, `ARTEFACT_PINS`, `fingerprint`.
+- `recording_annotations/` — exact-version condition index and acoustic rotor tracks; `open_release`, `iter_frames`, `load_frame`. Facets, evidence and usage: `docs/data-catalog.md#recording-annotations`.
 - `mixing.py` — the per-sample mixing math, one copy (disk-free): offline
   `mix_at_snr`, online `scale_source_to_snr`/`mix_at_source_to_noise_snr`,
   `resolve_motor_tracks`/`find_inflight_window`, `load_noise_source_frames`,

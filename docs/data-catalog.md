@@ -465,6 +465,130 @@ module's `PROVENANCE`):
   not. Four segments of `2021-02-18-16-43-54` are logged at 164 Hz, not 400:
   **group by `meta.system.native_rate_hz`**, never assume the nominal rate.
 
+## Recording annotations
+
+`drone-recording-annotations` is an index, not another copy of the waveforms.
+Its key is **parent dataset, full parent manifest SHA, exact sample key**.
+[`parents.json`](../src/data_processing/recording_annotations/parents.json)
+freezes the active corpus. A separate `uni-cpu` footer census found 583,989
+data keys and 21 `_meta` records in 65 parent versions. These are *not*
+583,989 independent recordings: clips, channel files, remixes, simulations,
+negative controls and logs are distinguished by provenance. A superseded
+pin without its own index never inherits annotations by matching a filename.
+
+Of the 583,708 audio-bearing keys, 1,620 are classified `constant`: 394
+have `resolved` tachometry, 1,023 `partial`, and 203 `unresolved`. The pass
+also examined potential plateaux in mixed or undocumented runs. Across all
+parents it accepted 94,570 individual rates in 53,704 time windows. Of
+these, 1,621 windows on 389 keys resolve **four of four**; a four-rate window
+on a six-rotor aircraft is partial and is not included in that count.
+`ca-spectrum-final-proof-608e6b` checked every source key and every finite
+rate. The verified release `drone-recording-annotations@e129e424098f` is
+135,243,992 bytes on R2 (one gzip-compressed SQLite index per parent), with
+no audio payload or change to a parent pin. `ca-publish-channel-316deb`
+read back all 65 indexes and matched their staged SHA-256 digests.
+
+The older `SPCUP19-egonoise` pack encodes ChuMS frequency axes and level
+spectra under `audio`. These 144 arrays are **not** half-second recordings.
+The index retains them as non-waveform products with links to their source;
+134 keys in that pack contain actual audio, including the 72 individual
+ChuMS microphone waveforms. The final correction removed the audio channel
+count from the 144 spectra; it reused 64 index shards and added one 250,816-byte shard.
+
+```python
+from data_processing import recording_annotations as ra
+
+idx = ra.open_release().index("DREGON-frames")
+filters = {"relative_motion": "fixed", "rotor_activity": "single",
+           "speed_supplied": "yes", "tach_status": ["resolved", "partial"]}
+for row in idx.select(filters, limit=5):      # metadata only; no PCM download
+    rec = idx.record(row["key"])              # evidence and per-window rates
+    print(row["key"], rec["sound_content"], rec["evidence"]["blade_count"])
+# Fetch an annotated Frame only when needed:
+# f = ra.load_frame("DREGON-frames", key); f["meta"]["recording_conditions"]
+```
+
+Filters are ANDed across fields, ORed within a field. `unknown` means evidence
+is insufficient; `not_applicable` means the question does not apply. Neither
+means “no”. `has_audio` and `provenance_kind` separate acoustic observations
+from flight logs or repeated representations. Existing parent pins, source
+speed series, split restrictions and licences stay unchanged; this index
+does not grant permission to redistribute a parent recording.
+
+| Filter | What the value describes |
+|---|---|
+| `rig_mount` | Aircraft constrained on a stand, tethered, grounded, handheld or in free flight; not the location of the mic. |
+| `speed_regime` | Shaft speeds during operation. A dedicated single-setting run can be steady on its motor-on span despite some drift or a silent lead-in. Different operating plateaux, significant ramps and stops can make a take `mixed`. A fixed airframe alone proves nothing about RPM. |
+| `propulsion`, `rotor_activity` | Propeller installed vs bare shaft; one, all, a subset or no active rotors. Counts are `n_active` and `n_rotors`, not hard-coded to four. |
+| `relative_motion` | Motion of the **hubs relative to the microphones**. Onboard mics can be fixed in free flight. A nominal fixed-position external hover is not a rigid attachment. Inspect `role_motion` on multi-recorder Frames. |
+| `speed_supplied` | Whether shaft speed is supplied, including run labels; `supplied_kind` distinguishes measurements, commands, nominal/run means and calibrated BPF. Current, throttle and PWM alone are not speed. Acoustic estimates do not change this field. |
+| `sound_content` | Drone only, another source physically co-recorded, a digital mixture, both, or no drone. An outdoor sound digitally mixed into chamber audio does not move the recording outdoors. |
+| `environment` | Actual acquisition room/field. Ordinary indoor, anechoic and semi-anechoic are distinct. |
+| `blade_count` | Blades per active shaft. Four motors with two blades each is `2`, not `4` or `8`. Stacked propellers on a shaft count together. Check the evidence for an inferred stock fit. |
+| `wind` | Significant microphone wind/downwash, not a weather-station reading. Inspect `role_wind` and the evidence; a short or high-pass-filtered clip can be unassessable. |
+
+Two useful cross-checks on the filters:
+
+- The [DREGON acquisition protocol](https://dregon.inria.fr/datasets/dregon/)
+  says the airframe for `MotorX_YY.wav` was suspended on a nylon string and
+  held still by hand. That is `tethered` with `relative_motion=fixed`, not
+  `fixed_stand`. `YY` is a nominal **turns/s** label; no measured bench trace
+  is supplied.
+- [Yi et al., Fig. 1](https://arxiv.org/abs/2304.11708) shows two blades on
+  each of the twelve photographed hubs of KAIST types A–C. A propeller fault
+  shortens a blade by about 10%; the installed blade count stays two. The
+  on-drone signal was recorded in an anechoic chamber and digitally mixed
+  with outdoor noise. `Clockwise` and `CounterClockwise` denote commanded
+  manoeuvres, not microphone channels.
+
+`wind/1` measures low-frequency (23–188 Hz) broadband fluctuations after
+masking tonal lines. It uses a microphone array to distinguish pressure
+buffeting on a capsule from an acoustic source heard coherently across the
+array. A positive channel covers at least 30% of the **assessed time**;
+`wind_detail` gives the role, channels, view coverage and evidence mode.
+On held-out AuDroK fly-pasts with the documented Mi4 low-frequency rise,
+four of eight were flagged and four remained unknown; none was called calm.
+None of 240 DREGON clean loudspeaker takes was flagged (198 below threshold,
+42 unknown). The compact-array mode without a coherent reference has weaker
+validation. Mono low-frequency rumble alone cannot certify wind; outdoor
+weather is not a substitute. Verification jobs: `wind-final-fede03`,
+`wind-exact-0c86df` on `uni-cpu`.
+
+The full wind pass examined 90,793 audio roles in 88,577 indexed samples,
+including 28 D3SET dual-recorder samples, three QMUL suspended/ground pairs
+and all 7,200 DN-LM **noise** stems. The role-level verdicts were 283
+significant, 128 mixed, 22,730 not significant and 67,652 unknown
+(`ca-wind-coverage-459f37`). These counts exclude short unassessed clips and
+are not counts of independent flights.
+
+`rps_acoustic` and `rps_acoustic_uncertainty` are additional time-stamped
+series in rev/s when a shaft rate is supported. Anonymous slots are **rate
+ranks within each observation**, not identified front/rear motors. Read the
+window boundaries, harmonic support, acceptance and uncertainty before using
+one as a label. Overlapping lines cannot establish two identical rotors; an
+unresolved slot is missing, not the rig average. Uncertainty measures acoustic
+repeatability, not absolute clock accuracy. The original AVQ/DREGON
+[long-window measurements](experiments/static-rig-profiles.md) document why a
+single whole-take FFT can miss rotors on a drifting bench rig.
+
+For example, `AVQ/S1_seq2` is `partial` over the whole take, yet 27 of its
+60 windows resolve four simultaneous shaft rates. The first 0–2 s window
+contains 79.80, 85.35, 88.85 and 97.15 rev/s, with repeatability tolerances
+0.24, 0.17, 0.24 and 0.09 rev/s. These are **anonymous**, not motor IDs.
+By contrast, the sole active shaft in `DREGON-frames/motor_Motor4_80` is
+named `Motor4`; its 6.2–11.1 s window measures 79.617 rev/s, not the
+nominal 80 printed on the file.
+
+The acoustic pass proposes shaft families from peaks of long Hann FFTs,
+using shorter views when a line drifts. A separate fit to whitened spectral
+bands tests the proposed order against its multiples and submultiples.
+Where a recording supplies independent shaft feedback, it can check a
+candidate **after** the fit; a published nominal run speed can constrain its
+scale. The fitted rate still comes from the audio. Each accepted window says
+which check supported it; an assisted result is not a blind tachometer
+benchmark. Native BPF estimates tuned against the audio (e.g. D3SET) are not
+independent speed feedback.
+
 ## Additional rotor-acoustics recordings
 
 Acquisition starts from the dload bucket, not from the upstream download
@@ -561,6 +685,13 @@ instead of assigning arbitrary coordinates. Channel 17 is **not** an
 additional onboard reference for beamforming. Across early/mid/late speech
 the onboard-minus-external delay is 6.1–8.0 ms, with 2–7 samples of within-run
 change; no shared hardware clock is documented and the delay is left intact.
+
+Clock caveat on `KULeuven-UAV-egonoise-frames@ada893bc5216`: the stored
+`GridIndex` has the correct sample count and rate but declares a zero
+duration. `RPM5000` contains 32.2972 s of 44.1 kHz audio. For overlays the
+reader uses the analysed role's grid origin and `n_samples / sample_rate`;
+it does not shorten the recording to the enclosing Frame's declared extent
+or rewrite the parent.
 
 For D3SET, all 27 derivative excerpts match parent windows within one PCM16
 LSB. Of the 21 original flights with onboard and array sound, 20 support the

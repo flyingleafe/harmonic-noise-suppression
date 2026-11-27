@@ -2685,12 +2685,13 @@ HISTORICAL_PINS = {
 }
 
 
-#: Small ARTEFACT trees: fitted model parameters a training stream reads, not
-#: data derived from recordings. They are versioned like data because the
-#: streams consume them per sample, but they have no parent dataset and no
-#: generator — a publish script turns a campaign's results into the tree, and
-#: `dload commit NAME --from data/NAME` uploads it.
+#: Versioned artifacts built outside this single-process derivation driver
+#: (campaign outputs or raw parameter trees). Each has its own producer below.
 ARTEFACT_PINS = {
+    "drone-recording-annotations": (
+        "Recording facets and acoustic tachometry, keyed by exact parent version and recording "
+        "key; scripts/annotate_drone_recordings.py builds the indexed companion without copying audio."
+    ),
     "rps-traj-fits": (
         "the fitted rotor-speed trajectory model (per-rig fits + the rig "
         "posterior), published by scripts/rps_traj_publish_fits.py and read by "

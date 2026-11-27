@@ -623,3 +623,39 @@ have no physical mechanism for shaft-locked harmonics and `gamma_hz` = 0 in
 the bank; additive floor noise never broadens a line, it only makes widths
 of lines under the floor unidentifiable.
 
+## Reusing the long-window method for recording annotations (2026-11-27)
+
+The proposed annotation is a shaft rate in rev/s on a finite time window,
+not the frequency of the strongest tone or the speed printed on the file.
+`tracking.steady_tachometry` fits exclusive harmonic peaks in Hann FFTs,
+checking the two halves and shortening the window around drift. An early
+version passed synthetic tests yet returned half-speed and one-third-speed
+aliases on real DREGON and AGH. Repeating the same peak fit on two halves
+measures repeatability; it does **not** establish the shaft order.
+
+The release gate uses `tracking.tach_corroboration`: a separate Blackman
+comb fit to per-mic-whitened spectral bands. Candidate and competing orders
+are compared over a common physical band; giving a doubled candidate more
+bandwidth biased the result towards it. Native feedback or a nominal run
+setting can check a spectral fit **afterwards**, never supply a missing
+value. The index retains the basis and the rejected intervals; coincidence
+of two indistinguishable lines is not evidence of two measured speeds.
+
+`uni-cpu`, `steady-tach-releaseq-883d79`, final gate `775ea3db1198`.
+“Nonempty” means at least one accepted rate; it does not mean a complete
+rotor set. Errors below compare accepted values only.
+
+| Check | Nonempty / attempted windows | What the comparison supports |
+|---|---:|---|
+| AVQ S1 calibration sequences, blind | 69/70 | 23 windows matched all four archived acoustic shaft families. 204/205 individual comparisons within 0.65 rev/s; worst 0.751. This is agreement between acoustic methods, not an independent tachometer. |
+| AGH single-motor mono, blind | 23/31 | Worst deviation from the archived acoustic readings 0.376 rev/s. |
+| Withheld DREGON single motors | 7/13 blind; 12/13 nominal-scale checked | Worst deviation from the archived core-peak readings 0.069 rev/s. The nominal speed was never copied into a spectral slot. |
+| MD2 with raw ESC feedback | 3/38 blind; 9/38 assisted | Blind: four accepted readings, median error 0.555 and max 0.683 rev/s against raw feedback. Assisted: ten readings, median 0.257 and max 1.167; conditional agreement, **not** blind performance. |
+| Bare-motor FLY013, held out | 1/10 blind; 3/10 assisted | Blind: one reading, error 0.353 rev/s. Assisted: five, max 0.412. This rig has no BPF: electrical shaft orders 84 and 98 are the anchors. |
+| AVQ speech with motors muted | 0/16 | Zero shaft estimates in 32 s of voiced audio. |
+
+The four-powered-rotor DREGON `allMotors_70` is the counterexample to
+“four installed, four measured”: the nominal-scale check supports three
+distinct families across the take; the blind full-rig check abstains.
+Use [the recording-condition index](../data-catalog.md#recording-annotations)
+to retrieve supported intervals without replacing any measured motor series.

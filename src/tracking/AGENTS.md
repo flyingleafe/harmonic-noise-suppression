@@ -16,12 +16,13 @@ Four layers; each knows only the layer below. `protocols.py` sits beside all fou
 | Front door | `top.py` | frame plumbing, EVERY stage (+ config dataclass), EVERY shipped variant as a named composition |
 | Ladder cores + frozen configs | `pipelines.py` | blind-annotation ladder + `CAPTURE_CFG`/`REFINE_CFG`/`TRACK_CFG`/`SEED_CFG` (changing them invalidates published annotations), the `blind_fullrange` coarse pass, the flagship peel (`ARMS`, `make_peels`), ONE tooth sampler `comb_teeth`. Computes, never a Stage |
 | Algorithm cores | one algorithm each (below) | arrays in, arrays out |
-| Primitives | `dsp.py` | `zoom_bands`, `demod` (the one demodulation driver), `boxcar`; `dsp_config`/`resolve` (device, pad), `thread_pool`. Torch only, numpy at every seam; imports nothing but numpy + torch |
+| Primitives | `dsp.py` | VK transforms and device/thread policy; CPU FFTs for steady tachometry. |
 
 Algorithm cores:
 
 - **Tracking** — `vk_tracking.py` (`VKConfig`, `vk_track`, `vk_envelopes`, `ls_project_envelopes` = the LS peel); `phase_increment_tracker.py` (`pi_kalman_refine(peel_audio=, pair_audio=)` — the PEEL SEAM); `joint_phase_kalman.py` (joint 4-rotor variant, probe only); `warp_refinement.py` (`iter_warp_refine`); `rps_refinement.py` (`refine_coherent`).
-- **Seeding** — `vk_blind_seeding.py` (`SeedConfig`, `blind_seed`, `stage_guard`, `logmag_spectrogram` = THE whitened spectrogram); `rotor_dp.py` (`viterbi_path`); `joint_beam_tracker.py` (`joint_beam_track`); `comb_seed.py` / `comb_fit.py` (research cores, not yet stages).
+- **Seeding** — `vk_blind_seeding.py` (`SeedConfig`, `blind_seed`, `stage_guard`, `logmag_spectrogram`); `rotor_dp.py`, `joint_beam_tracker.py`, `comb_seed.py`, `comb_fit.py`.
+- **Steady tachometry** — `steady_tachometry.estimate` and `tach_corroboration.compare_families`; see `docs/data-catalog.md#recording-annotations`.
 - **Judging** — `fitness.py` (`score_cells -> FitnessScore`, `Holdout`, `apply_control`, `residual_decompose`, `measure_tdoa`); `fitness_vk.py` (F_VK: `fvk_score`, `fvk_loss`, `optimize_trajectory`); `telemetry_refit.py` (`refit_window`, `presmooth`, `scale_summary`); `comb_displacement.py` (`demod_comb_bank`); `order_domain.py` (`comb_scan(half=)`); `phase_noise.py` (WP18 `arm_covariance`, `brickwall` = THE whole-window FFT filter, linewidth readings).
 - **Decomposition** — `decompose.py` (v2: `solve_config`, `k_cap`, `group_plan`, `solve_window`, `windowed`/`stitch_windows`, `order_cell_profile`) and `joint_decompose.py` (v3/v4: `JointState`, the three blocks, `stochastic_split`, `map_objective`, `fit_floor_powers`). Meant to be REBUILT from primitives (Further reading).
 - **Constants / data** — `rotors.py` (`MIXER`, `modes_from_rps`; re-exported by `data_processing.rps_synthesis`); `protocols.py` (Contracts).
