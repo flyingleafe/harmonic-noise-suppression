@@ -1174,7 +1174,7 @@ each setup's three fine-tunes once its pretraining succeeds.
 
 | setup | pretraining | mixed | fine-tune seeds 0 / 1 / 2 |
 |---|---|---|---|
-| hard | `mg-hard-resume-c044b7` (continues `mg-hard-pre-f6830e`) | `mg-hard-mix-89f9e2` | waiting on resumed pretraining |
+| hard | `mg-hard-resume-c044b7` (continues `mg-hard-pre-f6830e`) | `mg-hard-mix-89f9e2` | `mg-hard-ft-s0-df994e` / `mg-hard-ft-s1-52dd5a` / `mg-hard-ft-s2-d957f5` |
 | easy | `mg-easy-pre-9e5a42` | `mg-easy-mix-f23842` | `mg-easy-ft-s0-673158` / `mg-easy-ft-s1-2bce4e` / `mg-easy-ft-s2-930e9f` |
 
 **Status (2026-11-27).** The first hard pretraining attempt failed on a GitHub
@@ -1182,13 +1182,23 @@ fetch. Its retry published round 8 at 4 500 steps (`uniform` 6.36 rev/s),
 but a subsequent restart failed because the run directory already existed.
 `mg-hard-resume-c044b7` explicitly uses `resume=true` in the original Isambard
 results directory to retain its weights, optimizer, history and checkpoint
-index. The hard fine-tune watcher now waits for that job. Easy pretraining,
+index. Easy pretraining,
 both mixed arms, and all three easy fine-tunes completed. The easy
 fine-tunes reached 20 000 steps from the same `best_near_macro_median`
 checkpoint (step 21 000, real macro 9.50 rev/s).
 
+Hard pretraining stopped by saturation at step 60 000. Its selected
+`best_uniform_median` checkpoint is step 45 000 (uniform 3.42 rev/s, real
+macro 8.39 rev/s). The daemon recorded success, but the laptop's long-lived
+`omnirun wait` did not return; a fresh wait returned success immediately.
+Stopped the watcher and submitted all three hard fine-tunes directly to
+Isambard. The `--after` rejection is in Omnirun 0.6.3 `cli.py`: that path
+validates the backend against the local config before sending the job to the
+daemon, unlike ordinary submission.
+
 | run | final step | real macro at lowest five-round median (rev/s) | selected step |
 |---|---:|---:|---:|
+| hard pretraining | 60 000 | 8.03 | 39 500 |
 | easy pretraining | 36 000 | 7.37 | 17 000 |
 | easy mixed | 86 000 | 2.93 | 61 000 |
 | hard mixed | 49 000 | 3.90 | 34 000 |
