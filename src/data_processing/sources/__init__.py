@@ -26,7 +26,7 @@ on any box.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -624,19 +624,23 @@ def iter_recording_frames(
     *,
     version: str | None = None,
     splits: list[str] | None = None,
+    conditions: Mapping[str, Any] | None = None,
     sample_rate: int | None = None,
 ) -> Iterator[td.Frame]:
     """Stream a source's *published* frames dataset (the dload-native way to
     load recordings — fixes baked in, no raw tree needed).
 
     ``splits`` filters on ``meta.split``; ``sample_rate`` soxr-resamples the
-    ``audio`` entry (telemetry tracks are untouched).
+    ``audio`` entry (telemetry tracks are untouched). ``conditions`` selects
+    by the versioned recording annotation index before reading audio.
     """
     from data_processing.frames import resample_audio_series
     from data_processing.streams import iter_published_frames
 
     entry = get(name)
-    for frame in iter_published_frames(entry.frames_name, version, splits=splits):
+    for frame in iter_published_frames(
+        entry.frames_name, version, splits=splits, conditions=conditions
+    ):
         if sample_rate is not None and "audio" in frame:
             audio = frame["audio"]
             tindex = audio.tindex

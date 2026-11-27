@@ -429,7 +429,8 @@ def load_noise_source_frames(
         {"dataset": "michaels-frames@<ver>", "recording_ids": ["FLY125"]}
 
     Keys: ``dataset`` (required, optional ``@version``), ``splits`` /
-    ``split``, ``recording_ids``, ``exclude_recording_ids``, ``take``. Every
+    ``split``, ``conditions`` (recording facets), ``recording_ids``,
+    ``exclude_recording_ids``, ``take``. Every
     selected frame is reduced to the canonical (audio + rps + meta) noise
     frame at ``sample_rate`` — ``None`` keeps each recording's native rate
     (:func:`frames.adapt_recording_frame`) — fixes are baked in at derivation
@@ -455,7 +456,10 @@ def load_noise_source_frames(
         )
         kept = 0
         for frame in iter_published_frames(
-            name, version or None, splits=[str(s) for s in splits] if splits else None
+            name,
+            version or None,
+            splits=[str(s) for s in splits] if splits else None,
+            **({"conditions": spec["conditions"]} if "conditions" in spec else {}),
         ):
             rid = str(get_meta(frame, "recording_id", ""))
             if wanted is not None and rid not in wanted:

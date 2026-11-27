@@ -579,9 +579,10 @@ def iter_published_frames(
     version: str | None = None,
     *,
     splits: Iterable[str] | None = None,
+    conditions: Mapping[str, Any] | None = None,
     repo: dload.Repository | None = None,
 ) -> Iterator[td.Frame]:
-    """Stream a published ``tdframe-v1`` dataset as decoded ``td.Frame``s.
+    """Stream published recording Frames, optionally selecting by recording conditions.
 
     The plain-Python counterpart of :class:`DloadFrameDataset` for pool-style
     consumers (``online_mixing.TimeFrameNoisePool``,
@@ -592,19 +593,31 @@ def iter_published_frames(
     should subset what they keep before pulling the next one. ``repo`` overrides
     the shared R2 repository (e.g. :func:`local_repository` for an unpublished,
     locally-built dataset).
+
+    ``conditions`` opts into the exact-version annotation index: AND between
+    facets, OR between values of one facet. Only matching samples are read.
+    ``{}`` requests all annotated records; ``None`` keeps the original
+    tdframe-v1 stream and does not read the companion index. Acoustic RPM
+    estimates never replace a source-provided motor track.
     """
-    ds = (repo or open_repository()).dataset(str(dataset), version)
-    manifest_meta = ds.manifest.meta if isinstance(ds.manifest.meta, dict) else {}
-    if manifest_meta.get(LAYOUT_META_KEY) != TDFRAME_LAYOUT:
-        raise ValueError(
-            f"dataset {dataset!r} is not published with the {TDFRAME_LAYOUT} layout "
-            f"(manifest meta: {manifest_meta!r})"
-        )
     wanted = {str(s) for s in splits} if splits is not None else None
-    for sample in ds.samples():
-        if not is_data_sample(sample):
-            continue
-        frame = decode_tdframe(sample)
+    if conditions is not None:
+        from data_processing import recording_annotations as ra
+
+        indexed = ra.iter_frames(
+            str(dataset), conditions, version=version, release=ra.open_release(repo=repo)
+        )
+        frames = (frame for _, frame in indexed)
+    else:
+        ds = (repo or open_repository()).dataset(str(dataset), version)
+        manifest_meta = ds.manifest.meta if isinstance(ds.manifest.meta, dict) else {}
+        if manifest_meta.get(LAYOUT_META_KEY) != TDFRAME_LAYOUT:
+            raise ValueError(
+                f"dataset {dataset!r} is not published with the {TDFRAME_LAYOUT} layout "
+                f"(manifest meta: {manifest_meta!r})"
+            )
+        frames = (decode_tdframe(sample) for sample in ds.samples() if is_data_sample(sample))
+    for frame in frames:
         if wanted is not None and str(get_meta(frame, "split", "")) not in wanted:
             continue
         yield frame

@@ -461,19 +461,23 @@ def _samples(layout: dict[str, Any], where: str) -> int:
     return layout["present_data_bytes"] // 4
 
 
-def read_container(path: Path) -> tuple[np.ndarray, dict[str, str], dict[str, Any]]:
-    """MDM XML container -> (present float32 samples, container header, WAV layout)."""
-    raw = Path(path).read_bytes()
+def decode_container(raw: bytes, *, name: str) -> tuple[np.ndarray, dict[str, str], dict[str, Any]]:
+    """Decode a chamber mic's MDM XML from a file or dload field, without padding a short WAV."""
     m = _BINARY.search(raw)
     end = raw.rfind(b"</ns3:binary>")
     if m is None or end < m.end():
-        raise ValueError(f"{path}: no <ns3:binary> body")
+        raise ValueError(f"{name}: no <ns3:binary> body")
     header = dict(_HEADER.findall(raw[: m.start()].decode("utf-8")))
-    wav = base64.b64decode(raw[m.end() : end])
+    wav = base64.b64decode(memoryview(raw)[m.end() : end])
     del raw
     layout = wav_layout(wav)
-    n = _samples(layout, str(path))
+    n = _samples(layout, name)
     return np.frombuffer(wav, dtype="<f4", count=n, offset=layout["data_offset"]), header, layout
+
+
+def read_container(path: Path) -> tuple[np.ndarray, dict[str, str], dict[str, Any]]:
+    """Read one chamber mic from the Mobilithek file tree."""
+    return decode_container(Path(path).read_bytes(), name=str(path))
 
 
 def _read_wav(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
