@@ -1466,9 +1466,18 @@ def _zenodo(dataset: str, key: str, meta: dict, info: dict) -> dict:
             speed_supplied=("no", "only % of hovering power; no rpm"),
             sound_content=("drone_only", "survey uses n121/n122 as pure ego-noise test sequences"),
             environment=("unknown", "acquisition room not stated"),
-            blade_count=("unknown", "IRIS propeller not stated in the paper"),
+            blade_count=(
+                "2",
+                "Wang & Cavallaro 2018 Fig. 1(a,c): two-bladed propellers on the 3DR IRIS array prototype",
+            ),
         )
-        rec.update(n_rotors=4, n_active=4, tach_candidate=True, tach_role="wav")
+        rec.update(
+            n_rotors=4,
+            n_active=4,
+            tach_candidate=True,
+            tach_role="wav",
+            blade_count_basis="observed",
+        )
         rec["parent"] = {"source": "AS ego-noise (Wang & Cavallaro 2018); no native copy in dload"}
     if n in _SURVEY_FIXED_POWER_PCT:
         regime = ("constant", f"{n}: constant ({_SURVEY_FIXED_POWER_PCT[n]}%) noise power")

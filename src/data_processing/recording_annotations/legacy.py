@@ -1153,7 +1153,11 @@ _TEAM = {
     "Maverick": dict(
         environment=("anechoic", "summary: inside an anechoic chamber"),
         mount=None,
-        blade=None,
+        blade=(
+            "2",
+            "observed",
+            "Team Maverick acquisition report p.4 Fig. 2, top view: two folding blades on each of the four hubs",
+        ),
         motion=("fixed", "three lavalier mics taped under the body", "rigid_mount"),
     ),
     "NSS_Chellamma": dict(

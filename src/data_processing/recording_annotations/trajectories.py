@@ -145,6 +145,7 @@ def attach_track(frame: td.Frame, row: Mapping[str, Any]) -> td.Frame:
             "bridge_sha256": row.get("bridge_sha256"),
             "reference_sha256": row.get("reference_sha256"),
             "scale_calibration": track.get("diagnostics", {}).get("scale_calibration"),
+            "condition_order_prior": track.get("diagnostics", {}).get("condition_order_prior"),
             "uncertainty_kind": "estimator tolerance, not a calibrated confidence interval",
             "role": row["role"],
             "review_status": row["review_status"],

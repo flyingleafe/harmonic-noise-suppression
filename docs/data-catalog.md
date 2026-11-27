@@ -508,6 +508,35 @@ entries, including 1,728 with `provenance_kind="recording"` before microphone
 grouping. `ca-throttle-stage-f68c6e` verified that the new classifications
 changed no waveform locator, estimated rotor speed, wind result or measurement.
 
+**Opt-in continuous rotor tracks.** `drone-rotor-track-candidates@bd1605309f7c`
+contains 1,728 `tdframe-v1` trajectory-only Frames for the same 608 original
+recording groups (16 packs, 33,624,083 bytes; all keys and packs cold-verified).
+These are experimental acoustic estimates, **not** independent tachometer
+measurements. No audio, no replacement of supplied telemetry or `rps_acoustic`,
+and no change to the default annotation pin. Fetch the exact version with
+`dload pull drone-rotor-track-candidates --version bd1605309f7c`. The sample
+key is `<source dataset>/<exact source key>`. Rates (rev/s), anonymous track
+IDs, estimated tolerances and a provenance mask share a clock; in
+`rps_multiscale_provenance`, 0 = unknown, 1 = locally measured, 2 = supported by
+a track or by its shaft-order calibration, 3 = interpolated, 4 = inactive.
+Missing rates are NaN, not zero. Tolerances are not calibrated confidence
+intervals. A populated rate with unknown harmonic order can still be wrong.
+See the [multiscale evaluation](experiments/static-rig-profiles.md#whole-record-multiscale-trajectories).
+
+To join a trajectory to its exact original Frame, the research artifact
+`multiscale_reviewed_order_44ec3b18` also provides `review/source_shards.json`.
+Pull that index, then the single corresponding `tracks/part-NNN.jsonl.gz`
+and `receipts/part-NNN.json` via `scripts/r2sync.py pull`. No parent shard
+is needed unless requesting audio:
+
+```python
+from data_processing.recording_annotations.trajectories import load_tracked_frame
+
+f = load_tracked_frame("results/multiscale_reviewed_order_44ec3b18",
+                       "AVQ", "S1_seq1", audio=False)
+rates, provenance = f["rps_multiscale"], f["rps_multiscale_provenance"]
+```
+
 In the initial acoustic release (`e129e424098f`), 1,620 of the 583,708
 audio-bearing keys met the earlier `constant` rule: 394 `resolved`, 1,023
 `partial`, and 203 `unresolved`. The pass also examined potential plateaux

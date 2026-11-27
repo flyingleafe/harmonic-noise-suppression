@@ -850,3 +850,128 @@ Partial includes 193 recordings in which all active shaft rates were obtained
 at least once but not over the whole assessed active span, and 364 for which
 no single window supported every shaft. No parent, annotation pin, or
 waveform was replaced.
+
+**AVQ reconciliation.** Do not interpret `partial` as “we have never recovered
+the four shafts.” Commit `6920ecc0` reports four valid *tracks* on `S1_seq3`
+and `S2_seq1`. Commit `3edac1b9` finds all four expected families in 7/14,
+9/16 and 5/7 adaptive windows on `S1_seq1`, `S1_seq2` and `S1_seq3`.
+The later profile scripts interpolate between family detections and retain a
+separate `found` mask. Neither the four-slot array nor an interpolated point
+is independent local evidence. Conversely, a track is useful even when a
+short window cannot independently re-establish every harmonic order.
+
+There is also a real loss of recall, not just a difference of definitions.
+On the 70 short S1 comparison windows in `steady-tach-releaseq-883d79`,
+using the original four-family acoustic estimates and the declared 0.65 rev/s
+matching tolerance, 33 windows match all four prior to final corroboration
+(8/28, 23/32, 2/10 by sequence), and 23 after it (1/28, 20/32, 2/10).
+Corroboration loses 10 otherwise matching sets; the upstream estimator is
+already missing or mismatching at least one family on the other 37 windows.
+These are calibration comparisons, not independent tachometer truth.
+In the actual release, at `S1_seq1` 18–20 s the discarded candidate is
+55.001 rev/s; the older enclosing 15.75–23.12 s leaf read 55.019 rev/s.
+The other three rates also agree within 0.16 rev/s. This is evidence to
+test track-level corroboration across neighbouring windows, not to relax
+all ambiguity gates or to require phase splitting on every disputed line.
+
+## Whole-record, multiscale trajectories
+
+**Question.** Compared to `497ea2c5828a`, does full-span spectral evidence
+plus continuous tracking recover all *distinguishable* shaft rates for a
+larger fraction of active time? Count the same 608 original recording groups
+(580 four-rotor and 28 single-rotor); never count the three DroneAudioSet
+microphone views as independent runs. Keep time-varying anonymous trajectories,
+not independent per-window ranks. Missing direct evidence is not synonymous
+with a missing estimate: distinguish local measurement, weaker spectral
+evidence supported by an established track, bracketed interpolation, unknown
+and inactive. A repeated number in four slots is not evidence of multiplicity.
+
+**Baselines and masks.** The blind benchmark never sees the reviewed October
+AVQ values. Its S1 reference uses the three archived adaptive-window fits at
+`3edac1b9`, one-to-one shaft families, their found mask, and the native motor-on
+time offset. Report agreement with *found* entries, not the historical
+interpolant. The recovered full-run VK traces for `S1_seq3` and `S2_seq1`
+have a recording-level validity decision, not a framewise found mask; report
+them as descriptive comparisons. In a separately labeled assisted replay,
+use those historical estimates only to propose neighborhoods, then remeasure
+native PCM using disjoint microphone and harmonic-order sets. Never combine
+held-out comparisons and prior-assisted outputs into a blind score.
+
+**What interpolation alone buys.** `scripts/multiscale_bridge_audit.py` tests
+complete same-clock rate vectors bracketing a gap of at most 16 s, with at
+most 1 rev/s change per sorted rate, and no intervening silent/nonstationary
+flag or missing coverage. Preserve measured cells; mark only the other slots
+interpolated. Withhold the interior rates of disjoint triplets: of 356 withheld
+centers, 103 met the bridge rules and 101 matched all old rates within
+0.65 rev/s. In DroneAudioSet it was 80/81 covered cases and on AVQ 8/9.
+These are acoustic consistency checks, not tachometer truth or a success rate
+of 101/103 on arbitrary gaps. Across the frozen corpus the rule can fill 585
+additional **source-view** windows, but never discovers a missing shaft.
+Actual rate arrays, measured/interpolated masks and bracketing times are in
+`results/multiscale_bridge_audit/source_views.json`; R2 mirror of the same name.
+
+**First full-corpus fit (`44ec3b1877dc`).** The 33-part `uni-cpu` sweep covers
+all 1,728 source views (192,757.9 native audio seconds). The bounded spectral
+front end took a full-duration FFT on every input; none needed temporal
+tiling. Dyadic and local windows supply alternative candidates as lines drift.
+All paths remain anonymous. Numerical coverage alone gave four simultaneous
+numbers somewhere in 564/580 four-rotor groups, but comparison with withheld
+acoustic rates exposed a substantial octave problem. Never use the blind
+output as four isolated physical shaft measurements.
+
+**Order at the track level.** `scale_tracks.calibrate` votes on one harmonic
+order per continuous track using only same-view timestamped shaft-rate anchors.
+A compact recording-wide range can resolve an order only when it supports a
+unique scale. `bracket_tracks.fill_tracks` can rejoin a short octave-switched
+fragment when its independently measured teeth fit a single established path
+on *both* sides; it labels this `track_supported`. Short gaps between complete
+separated sets may instead be `interpolated`. Neither procedure extrapolates.
+With old anchor blocks omitted in the scale fit, 17,447/18,534 held-out rates
+matched within 0.65 rev/s (11,078 without the scale postprocessor). On native
+four-rotor source views, 245/281 complete withheld four-rate sets matched.
+These are conditional acoustic comparisons; four sources can share a wrong
+harmonic-order interpretation.
+
+- **AVQ calibration.** On the fixed 70 October S1 comparison windows, 6
+  blind sets matched, versus 23 using the previous published estimator.
+  After the same-source order and continuity corrections, **63/70** matched
+  (23/28, 31/32, 9/10). No October family values went into this fit. The
+  scale references are themselves acoustic, not an independent test rig.
+  `S1_seq1` at 18.5/19.5 s recovers the earlier ~55 rev/s family at
+  54.974/54.866; it also corrects the short half-speed detour at 19.5 s.
+- **Separate archival-assisted replay.** Use reviewed October leaf families
+  only as search neighborhoods and remeasure disjoint harmonic/mic sets.
+  For the three S1 takes, four rates were available at 81/120, 87/120 and
+  24/40 one-second centres including interpolation. With every other guide
+  detection omitted per family, 51/60 omitted rates had predictions and all
+  51 agreed within 0.65 rev/s. This is not a blind run. On the alternative
+  VK guide the `S1_seq3` and `S2_seq1` totals are 35/40 and 195/211; the
+  October VK trace is not independent framewise truth.
+- **Independent microphone views expose non-generalization.** On 23
+  DroneAudioSet drone-only groups where the two array clocks could be aligned,
+  the two independently processed arrays returned four rates at 596 common
+  centres, but only **8/596** complete sets agreed within 0.65 rev/s.
+  A separate leave-scene-out rig/throttle prior from the September survey
+  raised this to **119/379** (119/2,810 common centres). However, complete
+  same-source held-out anchor matches across the corpus fell from 280 to
+  148/320 under that prior (the denominator includes single-rotor controls).
+  Neither agreement test is ground truth. Keep the rig-prior ablation
+  separate; do not silently select the easier comparison.
+- **Candidate coverage, not correctness.** In the scale/continuity result,
+  563/580 four-rotor groups had four simultaneous estimates at least once;
+  142 covered at least 90% of assessed active time; 12 covered it all.
+  Only 63 groups' selected views had any four-rate reference withheld; 125/134
+  complete references matched there. A stricter descriptive screen (at least
+  three complete withheld centres over ≥4 s, all matched) passed in 15 groups;
+  only two of those also had complete active-time coverage. No such reference
+  exists on the selected view for the other 517 groups.
+
+Opt-in `drone-rotor-track-candidates@bd1605309f7c` (1,728 small trajectory
+Frames, all decoded and checked back from dload) does **not** replace the
+`497ea2c5828a` labels. The exact candidate lists are [all](../../results/multiscale_reviewed_order_44ec3b18/review/all.tsv),
+[584 partially covered](../../results/multiscale_reviewed_order_44ec3b18/review/partial.tsv)
+and [two without a rate](../../results/multiscale_reviewed_order_44ec3b18/review/unresolved.tsv).
+For this first sweep, those two were *skipped for missing blade count*, not
+shown to be acoustically unresolvable. The subsequent source audit established
+two blades per rotor in [Maverick's Fig. 2](https://dregon.inria.fr/SPCup2019_egonoise/SPCUP19_Maverick_documentation.pdf)
+and the [AS setup, Fig. 1](https://doi.org/10.1109/JSEN.2018.2825879).
