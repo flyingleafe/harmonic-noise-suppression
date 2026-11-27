@@ -242,6 +242,8 @@ def _schema_valid(facet: str, value: Any) -> bool:
 
 
 def _audio_channels(info: Mapping[str, Any]) -> int | None:
+    if info.get("has_audio") is False:
+        return None
     if info.get("n_channels") is not None:
         return int(info["n_channels"])
     series = info.get("series") or {}

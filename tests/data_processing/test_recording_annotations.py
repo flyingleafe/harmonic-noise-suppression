@@ -651,12 +651,19 @@ def test_chums_spectral_products_are_not_audio(tmp_path, monkeypatch):
         for loc, key, _ in ra.located_samples(dataset, manifest.version, repo=repo):
             audio = key.endswith("___RawTruncatedCalibrated")
             facts = _record() if audio else schema.normalize({}, has_audio=False)
-            w.add(key, facts, location=loc, info={"has_audio": audio})
+            w.add(
+                key,
+                facts,
+                location=loc,
+                info={"has_audio": audio, "series": {"audio": {"shape": [1, 3]}}},
+            )
     release = ra.open_release(stage, repo=repo)
     idx = release.index(dataset, manifest.version)
     assert list(idx.keys({"has_audio": True})) == [stem + "RawTruncatedCalibrated"]
     for kind in products:
         key = stem + kind
+        row = idx.select({"keys": [key]})[0]
+        assert row["n_channels"] is None
         frame = ra.load_frame(dataset, key, version=manifest.version, release=release)
         assert "audio" not in frame and frame.duration == 0
         spectral = frame["spectral_values"]
