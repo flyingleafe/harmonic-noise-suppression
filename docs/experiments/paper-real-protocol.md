@@ -772,15 +772,17 @@ Third submission at `4dca0314` to `isambard` (one GH200, 16 cores, 96 GB):
 Everything else as the other `rp_*` rows; the Table IV cells are read at the
 lowest five-round median of `real_macro` (`scripts/rp_history.py --best`).
 
-**Result, `all` (stopped by saturation at 60 000 steps).** Best five-round
-median of `real_macro` at step 54 500, raw values (Hz):
+**Results.** Both runs stopped by saturation (`all`: 60 000 steps; `alllab`:
+64 500). Raw values (rev/s) at the lowest five-round median of `real_macro`
+(step 54 500 / 60 000):
 
 | run | Macro | DREGON all | Z | S | R | C | MD2 all | Z | S | R | C |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | `rp_marcoux_grondin_all` | 2.54 | 3.29 | 0.00 | 12.23 | 7.28 | 2.32 | 1.80 | 1.67 | 2.43 | 7.69 | 1.24 |
+| `rp_marcoux_grondin_alllab` | 2.79 | 3.82 | 0.66 | 11.53 | 11.36 | 2.81 | 1.76 | 2.42 | 1.76 | 4.40 | 1.54 |
 
 Lowest macro of the no-augmentation rows (HarmoF0-L2 2.62, Conv+BiGRU 2.65).
-DREGON zero frames are exactly 0, the gate's output. `alllab` still running.
+DREGON zero frames score exactly 0 for the no-augmentation run.
 
 ## Implementation notes (for the cutover)
 

@@ -1174,8 +1174,28 @@ each setup's three fine-tunes once its pretraining succeeds.
 
 | setup | pretraining | mixed | fine-tune seeds 0 / 1 / 2 |
 |---|---|---|---|
-| hard | `mg-hard-pre-f6830e` | `mg-hard-mix-89f9e2` | after `mg-hard-pre-f6830e` |
-| easy | `mg-easy-pre-9e5a42` | `mg-easy-mix-f23842` | after `mg-easy-pre-9e5a42` |
+| hard | `mg-hard-pre-f6830e` (retried) | `mg-hard-mix-89f9e2` | waiting on pretraining |
+| easy | `mg-easy-pre-9e5a42` | `mg-easy-mix-f23842` | `mg-easy-ft-s0-673158` / `mg-easy-ft-s1-2bce4e` / `mg-easy-ft-s2-930e9f` |
+
+**Status (2026-11-27).** Hard pretraining failed before training on a GitHub
+fetch; requeued unchanged under the same job ID and restarted the fine-tune
+watcher. Easy pretraining, both mixed arms, and all three easy fine-tunes
+completed. The easy fine-tunes reached 20 000 steps from the same
+`best_near_macro_median` checkpoint (step 21 000, real macro 9.50 rev/s).
+
+| run | final step | real macro at lowest five-round median (rev/s) | selected step |
+|---|---:|---:|---:|
+| easy pretraining | 36 000 | 7.37 | 17 000 |
+| easy mixed | 86 000 | 2.93 | 61 000 |
+| hard mixed | 49 000 | 3.90 | 34 000 |
+| easy fine-tune seed 0 | 20 000 | 2.66 | 19 000 |
+| easy fine-tune seed 1 | 20 000 | 2.69 | 16 000 |
+| easy fine-tune seed 2 | 20 000 | 2.68 | 18 000 |
+
+Easy fine-tuning raw-best validation macro: 2.666 ± 0.018 rev/s (mean ±
+sample SD); the better real-only run scored 2.54 rev/s at its
+median-selected round. Source: synced R2 validation histories and the easy
+pretraining checkpoint index.
 
 ## Frequency-scaling probe of the grid (2026-10-26)
 
